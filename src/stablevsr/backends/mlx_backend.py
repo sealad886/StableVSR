@@ -23,12 +23,15 @@ class MLXBackend(Backend):
     """
 
     def name(self) -> str:
+        """Return the backend identifier."""
         return "mlx"
 
     def is_available(self) -> bool:
+        """Return True if the mlx package is importable."""
         return _MLX_AVAILABLE
 
     def capabilities(self) -> BackendCapabilities:
+        """Return scaffold capabilities — inference is not yet supported."""
         return BackendCapabilities(
             name="mlx",
             available=_MLX_AVAILABLE,
@@ -44,7 +47,9 @@ class MLXBackend(Backend):
         )
 
     def default_device(self) -> str:
+        """Return the default MLX device string."""
         return "gpu"
 
     def default_dtype_str(self) -> str:
+        """Return the default dtype for MLX compute."""
         return "float16"

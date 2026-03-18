@@ -6,6 +6,8 @@ import argparse
 import sys
 from pathlib import Path
 
+from stablevsr import __version__
+
 
 def cmd_backend_info(args: argparse.Namespace) -> None:
     """Print backend detection results."""
@@ -105,19 +107,20 @@ def _collect_sequences(input_dir: Path) -> list[tuple[str, Path]]:
     If it contains images directly (no subdirectories), the whole folder is a
     single sequence.
     """
-    subdirs = sorted(p for p in input_dir.iterdir() if p.is_dir())
+    subdirs = sorted(p for p in input_dir.iterdir() if p.is_dir() and not p.name.startswith("."))
     if subdirs:
         return [(d.name, d) for d in subdirs]
     # Flat folder — treat as a single unnamed sequence
     return [(input_dir.name, input_dir)]
 
 
-def _load_frames(seq_dir: Path) -> list:
+def _load_frames(seq_dir: Path) -> tuple[list, list[str]]:
     """Load sorted image files from *seq_dir* as PIL Images."""
     from PIL import Image
 
     paths = sorted(
-        p for p in seq_dir.iterdir()
+        p
+        for p in seq_dir.iterdir()
         if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
     )
     return [Image.open(p) for p in paths], [p.name for p in paths]
@@ -132,13 +135,13 @@ def cmd_infer(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     try:
-        from diffusers import DDPMScheduler, ControlNetModel
+        from diffusers import ControlNetModel, DDPMScheduler
     except ImportError:
         print("[ERROR] diffusers is required for inference. Install it first.")
         sys.exit(1)
 
     try:
-        from torchvision.models.optical_flow import raft_large, Raft_Large_Weights
+        from torchvision.models.optical_flow import Raft_Large_Weights, raft_large
     except ImportError:
         print("[ERROR] torchvision with RAFT support is required. Install it first.")
         sys.exit(1)
@@ -172,7 +175,9 @@ def cmd_infer(args: argparse.Namespace) -> None:
     model_id = args.model_id
     controlnet_src = args.controlnet_ckpt if args.controlnet_ckpt else model_id
     print(f"Loading controlnet from: {controlnet_src}")
-    controlnet_model = ControlNetModel.from_pretrained(controlnet_src, subfolder="controlnet")
+    controlnet_model = ControlNetModel.from_pretrained(
+        controlnet_src, subfolder="controlnet"
+    )
 
     print(f"Loading pipeline from: {model_id}")
     pipeline = StableVSRPipeline.from_pretrained(model_id, controlnet=controlnet_model)
@@ -207,7 +212,8 @@ def cmd_infer(args: argparse.Namespace) -> None:
             continue
 
         sr_frames = pipeline(
-            "", frames,
+            "",
+            frames,
             num_inference_steps=args.steps,
             guidance_scale=0,
             of_model=of_model,
@@ -224,29 +230,45 @@ def cmd_infer(args: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build and return the top-level argument parser with all subcommands."""
     parser = argparse.ArgumentParser(
         prog="stablevsr",
         description="StableVSR: Video super-resolution with temporally-consistent diffusion models",
     )
-    parser.add_argument("--version", action="version", version="%(prog)s 0.1.0")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("backend-info", help="Show available compute backends")
     sub.add_parser("doctor", help="Run diagnostic checks")
 
     infer_parser = sub.add_parser("infer", help="Run video super-resolution inference")
-    infer_parser.add_argument("--input", required=True, help="Input folder of LR image sequences")
-    infer_parser.add_argument("--output", required=True, help="Output folder for SR results")
-    infer_parser.add_argument("--model-id", default="claudiom4sir/StableVSR", help="Model ID or local path")
-    infer_parser.add_argument("--controlnet-ckpt", default=None, help="Custom controlnet checkpoint path")
-    infer_parser.add_argument("--steps", type=int, default=50, help="Inference steps (default: 50)")
-    infer_parser.add_argument("--seed", type=int, default=42, help="Random seed (default: 42)")
-    infer_parser.add_argument("--backend", default=None, help="Backend override (default: auto)")
+    infer_parser.add_argument(
+        "--input", required=True, help="Input folder of LR image sequences"
+    )
+    infer_parser.add_argument(
+        "--output", required=True, help="Output folder for SR results"
+    )
+    infer_parser.add_argument(
+        "--model-id", default="claudiom4sir/StableVSR", help="Model ID or local path"
+    )
+    infer_parser.add_argument(
+        "--controlnet-ckpt", default=None, help="Custom controlnet checkpoint path"
+    )
+    infer_parser.add_argument(
+        "--steps", type=int, default=50, help="Inference steps (default: 50)"
+    )
+    infer_parser.add_argument(
+        "--seed", type=int, default=42, help="Random seed (default: 42)"
+    )
+    infer_parser.add_argument(
+        "--backend", default=None, help="Backend override (default: auto)"
+    )
 
     return parser
 
 
 def main() -> None:
+    """Entry point for the ``stablevsr`` CLI."""
     parser = build_parser()
     args = parser.parse_args()
 

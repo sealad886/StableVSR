@@ -39,7 +39,18 @@ class BackendRegistry:
 
             if key == "torch":
                 device = requested.split("-", 1)[1] if "-" in requested else None
+                if device is not None:
+                    import torch
+                    valid = {"cpu", "cuda", "mps"}
+                    if device not in valid:
+                        raise ValueError(
+                            f"Unknown torch device '{device}'. Valid: {', '.join(sorted(valid))}"
+                        )
                 return TorchBackend(device=device)
+            if "-" in requested:
+                raise ValueError(
+                    f"Backend '{key}' does not support device suffixes; got '{requested}'"
+                )
             return cls()
 
         # Auto-detect: prefer MLX if it can actually do inference

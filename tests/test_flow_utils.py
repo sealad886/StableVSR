@@ -95,3 +95,87 @@ class TestDetectOcclusion:
         bw = torch.randn(1, 16, 16, 2)
         occlusion = detect_occlusion(fw, bw)
         assert occlusion.shape == (1, 16, 16)
+
+
+class TestGetFlow:
+    """Adversarial tests for get_flow — validates P0-001 fix."""
+
+    def test_subpixel_flow_preserved(self):
+        """Ensure float division preserves subpixel flow (was floor division bug)."""
+        from util.flow_utils import get_flow
+
+        class FakeModel:
+            def __call__(self, target, source):
+                # Return flow with subpixel values
+                flow = torch.full((1, 2, 8, 8), 0.7)
+                return [flow]
+
+        target = torch.randn(1, 3, 8, 8)
+        source = torch.randn(1, 3, 8, 8)
+        model = FakeModel()
+
+        result = get_flow(model, target, source, rescale_factor=1)
+        assert result.shape == (1, 8, 8, 2)
+        # Values should be 0.7, NOT 0.0 (which floor division would give)
+        assert result.abs().mean() > 0.5
+
+    def test_rescale_factor_preserves_subpixel(self):
+        """With rescale_factor != 1, subpixel values must survive."""
+        from util.flow_utils import get_flow
+
+        class FakeModel:
+            def __call__(self, target, source):
+                flow = torch.full((1, 2, 8, 8), 1.5)
+                return [flow]
+
+        target = torch.randn(1, 3, 8, 8)
+        source = torch.randn(1, 3, 8, 8)
+        model = FakeModel()
+
+        result = get_flow(model, target, source, rescale_factor=2)
+        # After dividing 1.5 / 2 = 0.75 (float) vs 0 (floor)
+        assert result.abs().mean() > 0.3
+
+    def test_rescale_factor_one_returns_permuted(self):
+        """rescale_factor=1 should skip interpolation, just permute."""
+        from util.flow_utils import get_flow
+
+        class FakeModel:
+            def __call__(self, target, source):
+                return [torch.randn(1, 2, 16, 16)]
+
+        result = get_flow(FakeModel(), torch.randn(1, 3, 16, 16), torch.randn(1, 3, 16, 16))
+        assert result.shape == (1, 16, 16, 2)
+
+
+class TestGetFlowForwardBackward:
+    """Tests for get_flow_forward_backward."""
+
+    def test_returns_two_flows(self):
+        from util.flow_utils import get_flow_forward_backward
+
+        class FakeModel:
+            def __call__(self, target, source):
+                return [torch.randn(1, 2, 8, 8)]
+
+        fw, bw = get_flow_forward_backward(
+            FakeModel(), torch.randn(1, 3, 8, 8), torch.randn(1, 3, 8, 8)
+        )
+        assert fw.shape == (1, 8, 8, 2)
+        assert bw.shape == (1, 8, 8, 2)
+
+
+class TestWarpError:
+    """Tests for warp_error function."""
+
+    def test_identical_frames_low_error(self):
+        from util.flow_utils import warp_error
+
+        class FakeModel:
+            def __call__(self, target, source):
+                return [torch.zeros(1, 2, 16, 16)]
+
+        model = FakeModel()
+        frame = torch.full((1, 3, 16, 16), 0.5)
+        error = warp_error(model, frame, frame.clone(), frame.clone(), frame.clone())
+        assert error.item() < 0.1

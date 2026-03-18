@@ -69,8 +69,7 @@ class TestCmdDoctor:
             pass
         captured = capsys.readouterr().out
         assert any(
-            kw in captured
-            for kw in ["[OK] MPS", "[OK] CUDA", "[WARN] No GPU backend"]
+            kw in captured for kw in ["[OK] MPS", "[OK] CUDA", "[WARN] No GPU backend"]
         )
 
     def test_exits_cleanly_when_all_deps_present(self, capsys):
@@ -109,3 +108,67 @@ class TestMain:
         with pytest.raises(SystemExit) as exc_info:
             main()
         assert exc_info.value.code == 1
+
+
+class TestCollectSequences:
+    """Adversarial tests for _collect_sequences."""
+
+    def test_hidden_dirs_excluded(self, tmp_path):
+        from stablevsr.cli import _collect_sequences
+
+        (tmp_path / ".hidden").mkdir()
+        (tmp_path / "visible").mkdir()
+        seqs = _collect_sequences(tmp_path)
+        names = [n for n, _ in seqs]
+        assert "visible" in names
+        assert ".hidden" not in names
+
+    def test_flat_folder_returns_self(self, tmp_path):
+        from stablevsr.cli import _collect_sequences
+
+        (tmp_path / "frame001.png").touch()
+        seqs = _collect_sequences(tmp_path)
+        assert len(seqs) == 1
+        assert seqs[0][1] == tmp_path
+
+
+class TestLoadFrames:
+    """Adversarial tests for _load_frames."""
+
+    def test_filters_non_image_files(self, tmp_path):
+        from PIL import Image
+
+        from stablevsr.cli import _load_frames
+
+        img = Image.new("RGB", (4, 4), "red")
+        img.save(tmp_path / "frame.png")
+        (tmp_path / ".DS_Store").touch()
+        (tmp_path / "readme.txt").touch()
+
+        frames, names = _load_frames(tmp_path)
+        assert len(frames) == 1
+        assert names == ["frame.png"]
+
+    def test_empty_dir_returns_empty(self, tmp_path):
+        from stablevsr.cli import _load_frames
+
+        frames, names = _load_frames(tmp_path)
+        assert frames == []
+        assert names == []
+
+
+class TestVersionConsistency:
+    """Ensure version string comes from package metadata."""
+
+    def test_version_in_parser(self):
+        parser = build_parser()
+        # The version action should contain the __version__ value
+        version_action = None
+        for action in parser._actions:
+            if isinstance(action, argparse._VersionAction):
+                version_action = action
+                break
+        assert version_action is not None
+        assert version_action.version is not None
+        from stablevsr import __version__
+        assert __version__ in version_action.version

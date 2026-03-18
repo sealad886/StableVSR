@@ -77,3 +77,31 @@ class TestRegistry:
         assert len(results) >= 2
         names = {r.name for r in results}
         assert "mlx" in names
+
+
+class TestRegistryDeviceSuffixValidation:
+    """Adversarial tests for device suffix validation in registry."""
+
+    def test_torch_bogus_device_raises(self):
+        with pytest.raises(ValueError, match="Unknown torch device"):
+            get_backend("torch-bogus")
+
+    def test_torch_gpu_raises(self):
+        """GPU is not valid—must use 'cuda' or 'mps'."""
+        with pytest.raises(ValueError, match="Unknown torch device"):
+            get_backend("torch-gpu")
+
+    def test_mlx_with_suffix_raises(self):
+        with pytest.raises(ValueError, match="does not support device suffixes"):
+            get_backend("mlx-gpu")
+
+    def test_env_var_override(self, monkeypatch):
+        monkeypatch.setenv("STABLEVSR_BACKEND", "torch-cpu")
+        backend = get_backend()
+        assert isinstance(backend, TorchBackend)
+        assert backend.default_device() == "cpu"
+
+    def test_env_var_invalid_raises(self, monkeypatch):
+        monkeypatch.setenv("STABLEVSR_BACKEND", "nonexistent")
+        with pytest.raises(ValueError, match="Unknown backend"):
+            get_backend()

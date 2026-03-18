@@ -22,13 +22,19 @@ import PIL.Image
 import torch
 import torch.nn.functional as F
 import torchvision.transforms as T
-from transformers import CLIPImageProcessor, CLIPTextModel, CLIPTokenizer
-
-
-
 from diffusers.image_processor import PipelineImageInput, VaeImageProcessor
-from diffusers.loaders import FromSingleFileMixin, LoraLoaderMixin, TextualInversionLoaderMixin
+from diffusers.loaders import (
+    FromSingleFileMixin,
+    LoraLoaderMixin,
+    TextualInversionLoaderMixin,
+)
 from diffusers.models import AutoencoderKL, ControlNetModel, UNet2DConditionModel
+from diffusers.pipelines import DiffusionPipeline
+from diffusers.pipelines.controlnet import MultiControlNetModel
+from diffusers.pipelines.stable_diffusion import (
+    StableDiffusionPipelineOutput,
+    StableDiffusionSafetyChecker,
+)
 from diffusers.schedulers import KarrasDiffusionSchedulers
 from diffusers.utils import (
     deprecate,
@@ -37,13 +43,10 @@ from diffusers.utils import (
     logging,
     replace_example_docstring,
 )
-from diffusers.utils.torch_utils import randn_tensor, is_compiled_module
-from diffusers.pipelines import DiffusionPipeline
-from diffusers.pipelines.controlnet import MultiControlNetModel
+from diffusers.utils.torch_utils import is_compiled_module, randn_tensor
+from transformers import CLIPImageProcessor, CLIPTextModel, CLIPTokenizer
+
 import util.flow_utils as of
-from diffusers.pipelines.stable_diffusion import StableDiffusionPipelineOutput, StableDiffusionSafetyChecker
-
-
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -129,6 +132,7 @@ class StableVSRPipeline(
         feature_extractor ([`~transformers.CLIPImageProcessor`]):
             A `CLIPImageProcessor` to extract features from generated images; used as inputs to the `safety_checker`.
     """
+
     _optional_components = ["safety_checker", "feature_extractor"]
 
     def __init__(
@@ -137,7 +141,12 @@ class StableVSRPipeline(
         text_encoder: CLIPTextModel,
         tokenizer: CLIPTokenizer,
         unet: UNet2DConditionModel,
-        controlnet: Union[ControlNetModel, List[ControlNetModel], Tuple[ControlNetModel], MultiControlNetModel],
+        controlnet: Union[
+            ControlNetModel,
+            List[ControlNetModel],
+            Tuple[ControlNetModel],
+            MultiControlNetModel,
+        ],
         scheduler: KarrasDiffusionSchedulers,
         safety_checker: StableDiffusionSafetyChecker,
         feature_extractor: CLIPImageProcessor,
@@ -175,9 +184,13 @@ class StableVSRPipeline(
             feature_extractor=feature_extractor,
         )
         self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
-        self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor, do_convert_rgb=True)
+        self.image_processor = VaeImageProcessor(
+            vae_scale_factor=self.vae_scale_factor, do_convert_rgb=True
+        )
         self.control_image_processor = VaeImageProcessor(
-            vae_scale_factor=self.vae_scale_factor, do_convert_rgb=True, do_normalize=True
+            vae_scale_factor=self.vae_scale_factor,
+            do_convert_rgb=True,
+            do_normalize=True,
         )
         self.register_to_config(requires_safety_checker=requires_safety_checker)
 
@@ -224,7 +237,9 @@ class StableVSRPipeline(
         if is_accelerate_available() and is_accelerate_version(">=", "0.17.0.dev0"):
             from accelerate import cpu_offload_with_hook
         else:
-            raise ImportError("`enable_model_cpu_offload` requires `accelerate v0.17.0` or higher.")
+            raise ImportError(
+                "`enable_model_cpu_offload` requires `accelerate v0.17.0` or higher."
+            )
 
         if torch.cuda.is_available():
             device = torch.device(f"cuda:{gpu_id}")
@@ -236,11 +251,15 @@ class StableVSRPipeline(
 
         hook = None
         for cpu_offloaded_model in [self.text_encoder, self.unet, self.vae]:
-            _, hook = cpu_offload_with_hook(cpu_offloaded_model, device, prev_module_hook=hook)
+            _, hook = cpu_offload_with_hook(
+                cpu_offloaded_model, device, prev_module_hook=hook
+            )
 
         if self.safety_checker is not None:
             # the safety checker can offload the vae again
-            _, hook = cpu_offload_with_hook(self.safety_checker, device, prev_module_hook=hook)
+            _, hook = cpu_offload_with_hook(
+                self.safety_checker, device, prev_module_hook=hook
+            )
 
         # control net hook has be manually offloaded as it alternates with unet
         cpu_offload_with_hook(self.controlnet, device)
@@ -342,11 +361,13 @@ class StableVSRPipeline(
                 return_tensors="pt",
             )
             text_input_ids = text_inputs.input_ids
-            untruncated_ids = self.tokenizer(prompt, padding="longest", return_tensors="pt").input_ids
+            untruncated_ids = self.tokenizer(
+                prompt, padding="longest", return_tensors="pt"
+            ).input_ids
 
-            if untruncated_ids.shape[-1] >= text_input_ids.shape[-1] and not torch.equal(
-                text_input_ids, untruncated_ids
-            ):
+            if untruncated_ids.shape[-1] >= text_input_ids.shape[
+                -1
+            ] and not torch.equal(text_input_ids, untruncated_ids):
                 removed_text = self.tokenizer.batch_decode(
                     untruncated_ids[:, self.tokenizer.model_max_length - 1 : -1]
                 )
@@ -355,7 +376,10 @@ class StableVSRPipeline(
                     f" {self.tokenizer.model_max_length} tokens: {removed_text}"
                 )
 
-            if hasattr(self.text_encoder.config, "use_attention_mask") and self.text_encoder.config.use_attention_mask:
+            if (
+                hasattr(self.text_encoder.config, "use_attention_mask")
+                and self.text_encoder.config.use_attention_mask
+            ):
                 attention_mask = text_inputs.attention_mask.to(device)
             else:
                 attention_mask = None
@@ -378,7 +402,9 @@ class StableVSRPipeline(
         bs_embed, seq_len, _ = prompt_embeds.shape
         # duplicate text embeddings for each generation per prompt, using mps friendly method
         prompt_embeds = prompt_embeds.repeat(1, num_images_per_prompt, 1)
-        prompt_embeds = prompt_embeds.view(bs_embed * num_images_per_prompt, seq_len, -1)
+        prompt_embeds = prompt_embeds.view(
+            bs_embed * num_images_per_prompt, seq_len, -1
+        )
 
         # get unconditional embeddings for classifier free guidance
         if do_classifier_free_guidance and negative_prompt_embeds is None:
@@ -414,7 +440,10 @@ class StableVSRPipeline(
                 return_tensors="pt",
             )
 
-            if hasattr(self.text_encoder.config, "use_attention_mask") and self.text_encoder.config.use_attention_mask:
+            if (
+                hasattr(self.text_encoder.config, "use_attention_mask")
+                and self.text_encoder.config.use_attention_mask
+            ):
                 attention_mask = uncond_input.attention_mask.to(device)
             else:
                 attention_mask = None
@@ -429,10 +458,16 @@ class StableVSRPipeline(
             # duplicate unconditional embeddings for each generation per prompt, using mps friendly method
             seq_len = negative_prompt_embeds.shape[1]
 
-            negative_prompt_embeds = negative_prompt_embeds.to(dtype=prompt_embeds_dtype, device=device)
+            negative_prompt_embeds = negative_prompt_embeds.to(
+                dtype=prompt_embeds_dtype, device=device
+            )
 
-            negative_prompt_embeds = negative_prompt_embeds.repeat(1, num_images_per_prompt, 1)
-            negative_prompt_embeds = negative_prompt_embeds.view(batch_size * num_images_per_prompt, seq_len, -1)
+            negative_prompt_embeds = negative_prompt_embeds.repeat(
+                1, num_images_per_prompt, 1
+            )
+            negative_prompt_embeds = negative_prompt_embeds.view(
+                batch_size * num_images_per_prompt, seq_len, -1
+            )
 
         return prompt_embeds, negative_prompt_embeds
 
@@ -442,10 +477,14 @@ class StableVSRPipeline(
             has_nsfw_concept = None
         else:
             if torch.is_tensor(image):
-                feature_extractor_input = self.image_processor.postprocess(image, output_type="pil")
+                feature_extractor_input = self.image_processor.postprocess(
+                    image, output_type="pil"
+                )
             else:
                 feature_extractor_input = self.image_processor.numpy_to_pil(image)
-            safety_checker_input = self.feature_extractor(feature_extractor_input, return_tensors="pt").to(device)
+            safety_checker_input = self.feature_extractor(
+                feature_extractor_input, return_tensors="pt"
+            ).to(device)
             image, has_nsfw_concept = self.safety_checker(
                 images=image, clip_input=safety_checker_input.pixel_values.to(dtype)
             )
@@ -470,13 +509,17 @@ class StableVSRPipeline(
         # eta corresponds to η in DDIM paper: https://arxiv.org/abs/2010.02502
         # and should be between [0, 1]
 
-        accepts_eta = "eta" in set(inspect.signature(self.scheduler.step).parameters.keys())
+        accepts_eta = "eta" in set(
+            inspect.signature(self.scheduler.step).parameters.keys()
+        )
         extra_step_kwargs = {}
         if accepts_eta:
             extra_step_kwargs["eta"] = eta
 
         # check if the scheduler accepts generator
-        accepts_generator = "generator" in set(inspect.signature(self.scheduler.step).parameters.keys())
+        accepts_generator = "generator" in set(
+            inspect.signature(self.scheduler.step).parameters.keys()
+        )
         if accepts_generator:
             extra_step_kwargs["generator"] = generator
         return extra_step_kwargs
@@ -494,7 +537,8 @@ class StableVSRPipeline(
         control_guidance_end=1.0,
     ):
         if (callback_steps is None) or (
-            callback_steps is not None and (not isinstance(callback_steps, int) or callback_steps <= 0)
+            callback_steps is not None
+            and (not isinstance(callback_steps, int) or callback_steps <= 0)
         ):
             raise ValueError(
                 f"`callback_steps` has to be a positive integer but is {callback_steps} of type"
@@ -510,8 +554,12 @@ class StableVSRPipeline(
             raise ValueError(
                 "Provide either `prompt` or `prompt_embeds`. Cannot leave both `prompt` and `prompt_embeds` undefined."
             )
-        elif prompt is not None and (not isinstance(prompt, str) and not isinstance(prompt, list)):
-            raise ValueError(f"`prompt` has to be of type `str` or `list` but is {type(prompt)}")
+        elif prompt is not None and (
+            not isinstance(prompt, str) and not isinstance(prompt, list)
+        ):
+            raise ValueError(
+                f"`prompt` has to be of type `str` or `list` but is {type(prompt)}"
+            )
 
         if negative_prompt is not None and negative_prompt_embeds is not None:
             raise ValueError(
@@ -557,7 +605,9 @@ class StableVSRPipeline(
             # When `image` is a nested list:
             # (e.g. [[canny_image_1, pose_image_1], [canny_image_2, pose_image_2]])
             elif any(isinstance(i, list) for i in image):
-                raise ValueError("A single batch of multiple conditionings are supported at the moment.")
+                raise ValueError(
+                    "A single batch of multiple conditionings are supported at the moment."
+                )
             elif len(image) != len(self.controlnet.nets):
                 raise ValueError(
                     f"For multiple controlnets: `image` must have the same length as the number of controlnets, but got {len(image)} images and {len(self.controlnet.nets)} ControlNets."
@@ -575,7 +625,9 @@ class StableVSRPipeline(
             and isinstance(self.controlnet._orig_mod, ControlNetModel)
         ):
             if not isinstance(controlnet_conditioning_scale, float):
-                raise TypeError("For single controlnet: `controlnet_conditioning_scale` must be type `float`.")
+                raise TypeError(
+                    "For single controlnet: `controlnet_conditioning_scale` must be type `float`."
+                )
         elif (
             isinstance(self.controlnet, MultiControlNetModel)
             or is_compiled
@@ -583,10 +635,12 @@ class StableVSRPipeline(
         ):
             if isinstance(controlnet_conditioning_scale, list):
                 if any(isinstance(i, list) for i in controlnet_conditioning_scale):
-                    raise ValueError("A single batch of multiple conditionings are supported at the moment.")
-            elif isinstance(controlnet_conditioning_scale, list) and len(controlnet_conditioning_scale) != len(
-                self.controlnet.nets
-            ):
+                    raise ValueError(
+                        "A single batch of multiple conditionings are supported at the moment."
+                    )
+            elif isinstance(controlnet_conditioning_scale, list) and len(
+                controlnet_conditioning_scale
+            ) != len(self.controlnet.nets):
                 raise ValueError(
                     "For multiple controlnets: When `controlnet_conditioning_scale` is specified as `list`, it must have"
                     " the same length as the number of controlnets"
@@ -617,16 +671,24 @@ class StableVSRPipeline(
                     f"control guidance start: {start} cannot be larger or equal to control guidance end: {end}."
                 )
             if start < 0.0:
-                raise ValueError(f"control guidance start: {start} can't be smaller than 0.")
+                raise ValueError(
+                    f"control guidance start: {start} can't be smaller than 0."
+                )
             if end > 1.0:
-                raise ValueError(f"control guidance end: {end} can't be larger than 1.0.")
+                raise ValueError(
+                    f"control guidance end: {end} can't be larger than 1.0."
+                )
 
     def check_image(self, image, prompt, prompt_embeds):
         image_is_pil = isinstance(image, PIL.Image.Image)
         image_is_tensor = isinstance(image, torch.Tensor)
         image_is_np = isinstance(image, np.ndarray)
-        image_is_pil_list = isinstance(image, list) and isinstance(image[0], PIL.Image.Image)
-        image_is_tensor_list = isinstance(image, list) and isinstance(image[0], torch.Tensor)
+        image_is_pil_list = isinstance(image, list) and isinstance(
+            image[0], PIL.Image.Image
+        )
+        image_is_tensor_list = isinstance(image, list) and isinstance(
+            image[0], torch.Tensor
+        )
         image_is_np_list = isinstance(image, list) and isinstance(image[0], np.ndarray)
 
         if (
@@ -670,7 +732,9 @@ class StableVSRPipeline(
         do_classifier_free_guidance=False,
         guess_mode=False,
     ):
-        image = self.control_image_processor.preprocess(image, height=height, width=width).to(dtype=torch.float32)
+        image = self.control_image_processor.preprocess(
+            image, height=height, width=width
+        ).to(dtype=torch.float32)
         image_batch_size = image.shape[0]
 
         if image_batch_size == 1:
@@ -689,8 +753,23 @@ class StableVSRPipeline(
         return image
 
     # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline.prepare_latents
-    def prepare_latents(self, batch_size, num_channels_latents, height, width, dtype, device, generator, latents=None):
-        shape = (batch_size, num_channels_latents, height // self.vae_scale_factor, width // self.vae_scale_factor)
+    def prepare_latents(
+        self,
+        batch_size,
+        num_channels_latents,
+        height,
+        width,
+        dtype,
+        device,
+        generator,
+        latents=None,
+    ):
+        shape = (
+            batch_size,
+            num_channels_latents,
+            height // self.vae_scale_factor,
+            width // self.vae_scale_factor,
+        )
         # shape = (batch_size, num_channels_latents, height, width)
         if isinstance(generator, list) and len(generator) != batch_size:
             raise ValueError(
@@ -699,27 +778,32 @@ class StableVSRPipeline(
             )
 
         if latents is None:
-            latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
+            latents = randn_tensor(
+                shape, generator=generator, device=device, dtype=dtype
+            )
         else:
             latents = latents.to(device)
 
         # scale the initial noise by the standard deviation required by the scheduler
         latents = latents * self.scheduler.init_noise_sigma
         return latents
-    
+
     def compute_flows(self, of_model, images, rescale_factor=1):
-        print('Computing forward and backward flows...')
+        print("Computing forward and backward flows...")
         forward_flows, backward_flows = [], []
         for i in range(1, len(images)):
             prev_image = images[i - 1]
             cur_image = images[i]
-            fflow = of.get_flow(of_model, cur_image, prev_image, rescale_factor=rescale_factor)
-            bflow = of.get_flow(of_model, prev_image, cur_image, rescale_factor=rescale_factor)
+            fflow = of.get_flow(
+                of_model, cur_image, prev_image, rescale_factor=rescale_factor
+            )
+            bflow = of.get_flow(
+                of_model, prev_image, cur_image, rescale_factor=rescale_factor
+            )
             forward_flows.append(fflow)
             backward_flows.append(bflow)
         backward_flows.reverse()
         return forward_flows, backward_flows
-        
 
     @torch.no_grad()
     @replace_example_docstring(EXAMPLE_DOC_STRING)
@@ -747,9 +831,9 @@ class StableVSRPipeline(
         guess_mode: bool = False,
         control_guidance_start: Union[float, List[float]] = 0.0,
         control_guidance_end: Union[float, List[float]] = 1.0,
-        of_model = None,
+        of_model=None,
         of_rescale_factor: int = 1,
-        timesteps_to_be_used: Optional[List[float]] = None
+        timesteps_to_be_used: Optional[List[float]] = None,
     ):
         r"""
         The call function to the pipeline for generation.
@@ -831,18 +915,34 @@ class StableVSRPipeline(
                 second element is a list of `bool`s indicating whether the corresponding generated image contains
                 "not-safe-for-work" (nsfw) content.
         """
-        controlnet = self.controlnet._orig_mod if is_compiled_module(self.controlnet) else self.controlnet
+        controlnet = (
+            self.controlnet._orig_mod
+            if is_compiled_module(self.controlnet)
+            else self.controlnet
+        )
 
         # align format for control guidance
-        if not isinstance(control_guidance_start, list) and isinstance(control_guidance_end, list):
-            control_guidance_start = len(control_guidance_end) * [control_guidance_start]
-        elif not isinstance(control_guidance_end, list) and isinstance(control_guidance_start, list):
-            control_guidance_end = len(control_guidance_start) * [control_guidance_end]
-        elif not isinstance(control_guidance_start, list) and not isinstance(control_guidance_end, list):
-            mult = len(controlnet.nets) if isinstance(controlnet, MultiControlNetModel) else 1
-            control_guidance_start, control_guidance_end = mult * [control_guidance_start], mult * [
-                control_guidance_end
+        if not isinstance(control_guidance_start, list) and isinstance(
+            control_guidance_end, list
+        ):
+            control_guidance_start = len(control_guidance_end) * [
+                control_guidance_start
             ]
+        elif not isinstance(control_guidance_end, list) and isinstance(
+            control_guidance_start, list
+        ):
+            control_guidance_end = len(control_guidance_start) * [control_guidance_end]
+        elif not isinstance(control_guidance_start, list) and not isinstance(
+            control_guidance_end, list
+        ):
+            mult = (
+                len(controlnet.nets)
+                if isinstance(controlnet, MultiControlNetModel)
+                else 1
+            )
+            control_guidance_start, control_guidance_end = mult * [
+                control_guidance_start
+            ], mult * [control_guidance_end]
 
         # 1. Check inputs. Raise error if not correct
         self.check_inputs(
@@ -871,8 +971,12 @@ class StableVSRPipeline(
         # corresponds to doing no classifier free guidance.
         do_classifier_free_guidance = guidance_scale > 1.0
 
-        if isinstance(controlnet, MultiControlNetModel) and isinstance(controlnet_conditioning_scale, float):
-            controlnet_conditioning_scale = [controlnet_conditioning_scale] * len(controlnet.nets)
+        if isinstance(controlnet, MultiControlNetModel) and isinstance(
+            controlnet_conditioning_scale, float
+        ):
+            controlnet_conditioning_scale = [controlnet_conditioning_scale] * len(
+                controlnet.nets
+            )
 
         global_pool_conditions = (
             controlnet.config.global_pool_conditions
@@ -883,7 +987,9 @@ class StableVSRPipeline(
 
         # 3. Encode input prompt
         text_encoder_lora_scale = (
-            cross_attention_kwargs.get("scale", None) if cross_attention_kwargs is not None else None
+            cross_attention_kwargs.get("scale", None)
+            if cross_attention_kwargs is not None
+            else None
         )
         prompt_embeds, negative_prompt_embeds = self.encode_prompt(
             prompt,
@@ -903,8 +1009,17 @@ class StableVSRPipeline(
 
         # 4. Prepare image
         if isinstance(controlnet, ControlNetModel):
-            images =  [self.control_image_processor.preprocess(image, height=height, width=width).to(dtype=torch.float32).to(device) for image in images]
-            upscaled_images = [F.interpolate(image, scale_factor=4, mode='bicubic') for image in images]
+            images = [
+                self.control_image_processor.preprocess(
+                    image, height=height, width=width
+                )
+                .to(dtype=torch.float32)
+                .to(device)
+                for image in images
+            ]
+            upscaled_images = [
+                F.interpolate(image, scale_factor=4, mode="bicubic") for image in images
+            ]
             height, width = upscaled_images[0].shape[-2:]
         elif isinstance(controlnet, MultiControlNetModel):
             images = []
@@ -938,16 +1053,19 @@ class StableVSRPipeline(
 
         # 6. Prepare latent variables
         num_channels_latents = self.vae.config.latent_channels
-        latents = [self.prepare_latents(
-                    batch_size * num_images_per_prompt,
-                    num_channels_latents,
-                    height,
-                    width,
-                    prompt_embeds.dtype,
-                    device,
-                    generator
-                ) for _ in range(len(images))]
-        
+        latents = [
+            self.prepare_latents(
+                batch_size * num_images_per_prompt,
+                num_channels_latents,
+                height,
+                width,
+                prompt_embeds.dtype,
+                device,
+                generator,
+            )
+            for _ in range(len(images))
+        ]
+
         noise_level = torch.cat([torch.tensor([20], dtype=torch.long, device=device)])
         # 7. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
@@ -959,14 +1077,18 @@ class StableVSRPipeline(
                 1.0 - float(i / len(timesteps) < s or (i + 1) / len(timesteps) > e)
                 for s, e in zip(control_guidance_start, control_guidance_end)
             ]
-            controlnet_keep.append(keeps[0] if isinstance(controlnet, ControlNetModel) else keeps)
+            controlnet_keep.append(
+                keeps[0] if isinstance(controlnet, ControlNetModel) else keeps
+            )
 
         # 8. Denoising loop
-        forward_flows, backward_flows = self.compute_flows(of_model, upscaled_images, rescale_factor=of_rescale_factor)
-        interp_mode = 'bilinear' if of_rescale_factor == 1 else 'nearest'
-        
+        forward_flows, backward_flows = self.compute_flows(
+            of_model, upscaled_images, rescale_factor=of_rescale_factor
+        )
+        interp_mode = "bilinear" if of_rescale_factor == 1 else "nearest"
+
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
-        with self.progress_bar(total=len(timesteps)*len(images)) as progress_bar:
+        with self.progress_bar(total=len(timesteps) * len(images)) as progress_bar:
             reversed = False
 
             # for t, for image --> frame wise sampling
@@ -976,34 +1098,53 @@ class StableVSRPipeline(
                     image = data
 
                     # compute Temporal Texture Guidance
-                    if num_image != 0: # if it's not the first image
-                        x0_est = self.vae.decode(x0_est / self.vae.config.scaling_factor, return_dict=False)[0] # convert x0_est to RGB
-                        warped_prev_est = of.flow_warp(x0_est, flows[num_image - 1], interp_mode=interp_mode) # warp it to current frame
-                        
+                    if num_image != 0:  # if it's not the first image
+                        x0_est = self.vae.decode(
+                            x0_est / self.vae.config.scaling_factor, return_dict=False
+                        )[
+                            0
+                        ]  # convert x0_est to RGB
+                        warped_prev_est = of.flow_warp(
+                            x0_est, flows[num_image - 1], interp_mode=interp_mode
+                        )  # warp it to current frame
+
                     # expand the latents if we are doing classifier free guidance
-                    latent_model_input = torch.cat([latents[num_image]] * 2) if do_classifier_free_guidance else latents[num_image]
-                    latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
+                    latent_model_input = (
+                        torch.cat([latents[num_image]] * 2)
+                        if do_classifier_free_guidance
+                        else latents[num_image]
+                    )
+                    latent_model_input = self.scheduler.scale_model_input(
+                        latent_model_input, t
+                    )
                     latent_model_input = torch.cat([latent_model_input, image], dim=1)
 
                     # controlnet(s) inference
                     if guess_mode and do_classifier_free_guidance:
                         # Infer ControlNet only for the conditional batch.
                         control_model_input = latents
-                        control_model_input = self.scheduler.scale_model_input(control_model_input, t)
+                        control_model_input = self.scheduler.scale_model_input(
+                            control_model_input, t
+                        )
                         controlnet_prompt_embeds = prompt_embeds.chunk(2)[1]
                     else:
                         control_model_input = latent_model_input
                         controlnet_prompt_embeds = prompt_embeds
 
                     if isinstance(controlnet_keep[i], list):
-                        cond_scale = [c * s for c, s in zip(controlnet_conditioning_scale, controlnet_keep[i])]
+                        cond_scale = [
+                            c * s
+                            for c, s in zip(
+                                controlnet_conditioning_scale, controlnet_keep[i]
+                            )
+                        ]
                     else:
                         controlnet_cond_scale = controlnet_conditioning_scale
                         if isinstance(controlnet_cond_scale, list):
                             controlnet_cond_scale = controlnet_cond_scale[0]
                         cond_scale = controlnet_cond_scale * controlnet_keep[i]
 
-                    if num_image == 0: 
+                    if num_image == 0:
                         # predict without Temporal Conditioning Module
                         down_block_res_samples = None
                         mid_block_res_sample = None
@@ -1018,16 +1159,24 @@ class StableVSRPipeline(
                             # class_labels = noise_level,
                             guess_mode=guess_mode,
                             return_dict=False,
-                            timestep_cond=None
+                            timestep_cond=None,
                         )
 
                         if guess_mode and do_classifier_free_guidance:
                             # Infered ControlNet only for the conditional batch.
                             # To apply the output of ControlNet to both the unconditional and conditional batches,
                             # add 0 to the unconditional batch to keep it unchanged.
-                            down_block_res_samples = [torch.cat([torch.zeros_like(d), d]) for d in down_block_res_samples]
-                            mid_block_res_sample = torch.cat([torch.zeros_like(mid_block_res_sample), mid_block_res_sample])
-                    
+                            down_block_res_samples = [
+                                torch.cat([torch.zeros_like(d), d])
+                                for d in down_block_res_samples
+                            ]
+                            mid_block_res_sample = torch.cat(
+                                [
+                                    torch.zeros_like(mid_block_res_sample),
+                                    mid_block_res_sample,
+                                ]
+                            )
+
                     # predict the noise residual
                     noise_pred = self.unet(
                         latent_model_input,
@@ -1043,19 +1192,29 @@ class StableVSRPipeline(
                     # perform guidance
                     if do_classifier_free_guidance:
                         noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                        noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+                        noise_pred = noise_pred_uncond + guidance_scale * (
+                            noise_pred_text - noise_pred_uncond
+                        )
 
                     # compute the previous noisy sample x_t -> x_t-1
-                    output = self.scheduler.step(noise_pred, t, latents[num_image], **extra_step_kwargs)
-                    latents[num_image], x0_est = output.prev_sample, output.pred_original_sample # x_t-1, x0_est
+                    output = self.scheduler.step(
+                        noise_pred, t, latents[num_image], **extra_step_kwargs
+                    )
+                    latents[num_image], x0_est = (
+                        output.prev_sample,
+                        output.pred_original_sample,
+                    )  # x_t-1, x0_est
 
                     # call the callback, if provided
-                    if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
+                    if i == len(timesteps) - 1 or (
+                        (i + 1) > num_warmup_steps
+                        and (i + 1) % self.scheduler.order == 0
+                    ):
                         progress_bar.update()
                         if callback is not None and i % callback_steps == 0:
                             callback(i, t, latents)
-                            
-                # reverse all for bidirectional sampling          
+
+                # reverse all for bidirectional sampling
                 images.reverse()
                 latents.reverse()
                 upscaled_images.reverse()
@@ -1074,7 +1233,12 @@ class StableVSRPipeline(
                 torch.cuda.empty_cache()
 
         if not output_type == "latent":
-            images = [self.vae.decode(latent / self.vae.config.scaling_factor, return_dict=False)[0] for latent in latents]
+            images = [
+                self.vae.decode(
+                    latent / self.vae.config.scaling_factor, return_dict=False
+                )[0]
+                for latent in latents
+            ]
         else:
             image = latents
             has_nsfw_concept = None
@@ -1085,7 +1249,12 @@ class StableVSRPipeline(
         else:
             do_denormalize = [not has_nsfw for has_nsfw in has_nsfw_concept]
 
-        images = [self.image_processor.postprocess(image, output_type=output_type, do_denormalize=do_denormalize) for image in images]
+        images = [
+            self.image_processor.postprocess(
+                image, output_type=output_type, do_denormalize=do_denormalize
+            )
+            for image in images
+        ]
 
         # Offload last model to CPU
         if hasattr(self, "final_offload_hook") and self.final_offload_hook is not None:
@@ -1094,4 +1263,6 @@ class StableVSRPipeline(
         if not return_dict:
             return (image, has_nsfw_concept)
 
-        return StableDiffusionPipelineOutput(images=images, nsfw_content_detected=has_nsfw_concept)
+        return StableDiffusionPipelineOutput(
+            images=images, nsfw_content_detected=has_nsfw_concept
+        )

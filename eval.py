@@ -1,24 +1,37 @@
-from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity as LPIPS
+import argparse
+import os
+import warnings
+
+import numpy as np
+import pyiqa
+import torch
+from DISTS_pytorch import DISTS
+from PIL import Image
 from torchmetrics.image import PeakSignalNoiseRatio as PSNR
 from torchmetrics.image import StructuralSimilarityIndexMeasure as SSIM
-import pyiqa
-from DISTS_pytorch import DISTS
-from torchvision.models.optical_flow import raft_large as raft
-import os
-import numpy as np
+from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity as LPIPS
+from torchvision.models.optical_flow import Raft_Large_Weights, raft_large as raft
+from torchvision.transforms import CenterCrop, ToTensor
 from tqdm import tqdm
-import torch
-from PIL import Image
-from torchvision.transforms import ToTensor, CenterCrop
+
 from util.flow_utils import get_flow
-import argparse
-import warnings
+
 warnings.filterwarnings("ignore")
 
 parser = argparse.ArgumentParser(description="Evaluation code for StableVSR.")
 # expected folder organization: root/sequences/frames
-parser.add_argument("--out_path", type=str, default='./StableVSR_results/', help="Path to output folder containing the upscaled frames.")
-parser.add_argument("--gt_path", type=str, default=None, help="Path to folder with GT frames (required).")
+parser.add_argument(
+    "--out_path",
+    type=str,
+    default="./StableVSR_results/",
+    help="Path to output folder containing the upscaled frames.",
+)
+parser.add_argument(
+    "--gt_path",
+    type=str,
+    default=None,
+    help="Path to folder with GT frames (required).",
+)
 args = parser.parse_args()
 
 if args.gt_path is None:
@@ -33,19 +46,19 @@ rec_path = args.out_path
 seqs = sorted(os.listdir(rec_path))
 
 if torch.cuda.is_available():
-    device = torch.device('cuda')
+    device = torch.device("cuda")
 elif torch.backends.mps.is_available():
-    device = torch.device('mps')
+    device = torch.device("mps")
 else:
-    device = torch.device('cpu')
-of_model = raft(pretrained=True).to(device)
+    device = torch.device("cpu")
+of_model = raft(weights=Raft_Large_Weights.DEFAULT).to(device)
 lpips = LPIPS(normalize=True).to(device)
 dists = DISTS().to(device)
 psnr = PSNR(data_range=1).to(device)
 ssim = SSIM(data_range=1).to(device)
-musiq = pyiqa.create_metric('musiq', device=device, as_loss=False)
-niqe = pyiqa.create_metric('niqe', device=device, as_loss=False)
-clip = pyiqa.create_metric('clipiqa', device=device, as_loss=False)
+musiq = pyiqa.create_metric("musiq", device=device, as_loss=False)
+niqe = pyiqa.create_metric("niqe", device=device, as_loss=False)
+clip = pyiqa.create_metric("clipiqa", device=device, as_loss=False)
 
 lpips_dict = {}
 psnr_dict = {}
@@ -68,7 +81,7 @@ for seq in seqs:
 
     ims_rec = sorted(os.listdir(os.path.join(rec_path, seq)))
     ims_gt = sorted(os.listdir(os.path.join(gt_path, seq)))
-    
+
     lpips_dict[seq] = []
     psnr_dict[seq] = []
     ssim_dict[seq] = []
@@ -96,7 +109,14 @@ for seq in seqs:
             if i > 0:
                 tlpips_value = (lpips(gt, prev_gt) - lpips(rec, prev_rec)).abs()
                 tlpips_dict[seq].append(tlpips_value.item())
-                tof_value = (get_flow(of_model, rec, prev_rec) - get_flow(of_model, gt, prev_gt)).abs().mean()
+                tof_value = (
+                    (
+                        get_flow(of_model, rec, prev_rec)
+                        - get_flow(of_model, gt, prev_gt)
+                    )
+                    .abs()
+                    .mean()
+                )
                 tof_dict[seq].append(tof_value.item())
 
         psnr_dict[seq].append(psnr_value.item())
@@ -110,17 +130,29 @@ for seq in seqs:
         prev_rec = rec
         prev_gt = gt
         pbar.update()
-        
+
 
 pbar.close()
-mean_lpips = np.round(np.mean([np.mean(lpips_dict[key]) for key in lpips_dict.keys()]), 3)
-mean_dists = np.round(np.mean([np.mean(dists_dict[key]) for key in dists_dict.keys()]), 3)
+mean_lpips = np.round(
+    np.mean([np.mean(lpips_dict[key]) for key in lpips_dict.keys()]), 3
+)
+mean_dists = np.round(
+    np.mean([np.mean(dists_dict[key]) for key in dists_dict.keys()]), 3
+)
 mean_psnr = np.round(np.mean([np.mean(psnr_dict[key]) for key in psnr_dict.keys()]), 2)
 mean_ssim = np.round(np.mean([np.mean(ssim_dict[key]) for key in ssim_dict.keys()]), 3)
-mean_musiq = np.round(np.mean([np.mean(musiq_dict[key]) for key in musiq_dict.keys()]), 2)
+mean_musiq = np.round(
+    np.mean([np.mean(musiq_dict[key]) for key in musiq_dict.keys()]), 2
+)
 mean_niqe = np.round(np.mean([np.mean(niqe_dict[key]) for key in niqe_dict.keys()]), 2)
 mean_clip = np.round(np.mean([np.mean(clip_dict[key]) for key in clip_dict.keys()]), 3)
-mean_tlpips = np.round(np.mean([np.mean(tlpips_dict[key]) for key in tlpips_dict.keys()]) * 1e3, 2)
-mean_tof = np.round(np.mean([np.mean(tof_dict[key]) for key in tof_dict.keys()]) * 1e1, 3)
+mean_tlpips = np.round(
+    np.mean([np.mean(tlpips_dict[key]) for key in tlpips_dict.keys()]) * 1e3, 2
+)
+mean_tof = np.round(
+    np.mean([np.mean(tof_dict[key]) for key in tof_dict.keys()]) * 1e1, 3
+)
 
-print(f'PSNR: {mean_psnr}, SSIM: {mean_ssim}, LPIPS: {mean_lpips}, DISTS: {mean_dists}, MUSIQ: {mean_musiq}, CLIP: {mean_clip}, NIQE: {mean_niqe}, tLPIPS: {mean_tlpips}, tOF: {mean_tof}')
+print(
+    f"PSNR: {mean_psnr}, SSIM: {mean_ssim}, LPIPS: {mean_lpips}, DISTS: {mean_dists}, MUSIQ: {mean_musiq}, CLIP: {mean_clip}, NIQE: {mean_niqe}, tLPIPS: {mean_tlpips}, tOF: {mean_tof}"
+)

@@ -18,8 +18,11 @@ warnings.filterwarnings("ignore")
 parser = argparse.ArgumentParser(description="Evaluation code for StableVSR.")
 # expected folder organization: root/sequences/frames
 parser.add_argument("--out_path", type=str, default='./StableVSR_results/', help="Path to output folder containing the upscaled frames.")
-parser.add_argument("--gt_path", type=str, default='/home/crota/Datasets/REDS4/test/gt/', help="Path to folder with GT frames.")
+parser.add_argument("--gt_path", type=str, default=None, help="Path to folder with GT frames (required).")
 args = parser.parse_args()
+
+if args.gt_path is None:
+    parser.error("--gt_path is required. Provide the path to GT frames.")
 
 print("Run with arguments:")
 for arg, value in vars(args).items():
@@ -29,15 +32,20 @@ gt_path = args.gt_path
 rec_path = args.out_path
 seqs = sorted(os.listdir(rec_path))
 
-device = torch.device('cuda')
+if torch.cuda.is_available():
+    device = torch.device('cuda')
+elif torch.backends.mps.is_available():
+    device = torch.device('mps')
+else:
+    device = torch.device('cpu')
 of_model = raft(pretrained=True).to(device)
 lpips = LPIPS(normalize=True).to(device)
 dists = DISTS().to(device)
 psnr = PSNR(data_range=1).to(device)
 ssim = SSIM(data_range=1).to(device)
-musiq = pyiqa.create_metric('musiq', device='cuda', as_loss=False)
-niqe = pyiqa.create_metric('niqe', device='cuda', as_loss=False)
-clip = pyiqa.create_metric('clipiqa', device='cuda', as_loss=False)
+musiq = pyiqa.create_metric('musiq', device=device, as_loss=False)
+niqe = pyiqa.create_metric('niqe', device=device, as_loss=False)
+clip = pyiqa.create_metric('clipiqa', device=device, as_loss=False)
 
 lpips_dict = {}
 psnr_dict = {}

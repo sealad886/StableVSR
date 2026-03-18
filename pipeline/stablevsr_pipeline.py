@@ -14,6 +14,7 @@
 
 
 import inspect
+import logging
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -225,7 +226,13 @@ class StableVSRPipeline(
         else:
             raise ImportError("`enable_model_cpu_offload` requires `accelerate v0.17.0` or higher.")
 
-        device = torch.device(f"cuda:{gpu_id}")
+        if torch.cuda.is_available():
+            device = torch.device(f"cuda:{gpu_id}")
+        elif torch.backends.mps.is_available():
+            device = torch.device("mps")
+        else:
+            device = torch.device("cpu")
+            logging.getLogger(__name__).warning("CPU offloading to CPU is a no-op")
 
         hook = None
         for cpu_offloaded_model in [self.text_encoder, self.unet, self.vae]:
@@ -1063,7 +1070,8 @@ class StableVSRPipeline(
         if hasattr(self, "final_offload_hook") and self.final_offload_hook is not None:
             self.unet.to("cpu")
             self.controlnet.to("cpu")
-            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
         if not output_type == "latent":
             images = [self.vae.decode(latent / self.vae.config.scaling_factor, return_dict=False)[0] for latent in latents]

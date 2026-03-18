@@ -737,7 +737,7 @@ def main(args):
             unet.enable_xformers_memory_efficient_attention()
             controlnet.enable_xformers_memory_efficient_attention()
         else:
-            raise ValueError("xformers is not available. Make sure it is installed correctly")
+            logger.warning("xformers is not available; continuing without memory-efficient attention.")
 
     if args.gradient_checkpointing:
         controlnet.enable_gradient_checkpointing()
@@ -756,7 +756,8 @@ def main(args):
     # Enable TF32 for faster training on Ampere GPUs,
     # cf https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices
     if args.allow_tf32:
-        torch.backends.cuda.matmul.allow_tf32 = True
+        if torch.cuda.is_available():
+            torch.backends.cuda.matmul.allow_tf32 = True
 
     if args.scale_lr:
         args.learning_rate = (
@@ -765,6 +766,8 @@ def main(args):
 
     # Use 8-bit Adam for lower memory usage or to fine-tune the model in 16GB GPUs
     if args.use_8bit_adam:
+        if not torch.cuda.is_available():
+            raise RuntimeError("8-bit Adam requires CUDA. Remove --use_8bit_adam on non-CUDA platforms.")
         try:
             import bitsandbytes as bnb
         except ImportError:

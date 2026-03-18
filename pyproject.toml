@@ -48,7 +48,8 @@ train = [
     "basicsr>=1.4",
     "omegaconf>=2.3",
     "einops>=0.8",
-    "bitsandbytes>=0.43",
+    "bitsandbytes>=0.43; sys_platform != 'darwin'",
+    "xformers; sys_platform != 'darwin'",
     "wandb",
     "tensorboard",
 ]
@@ -63,8 +64,7 @@ dev = [
     "ruff>=0.4",
 ]
 mlx = [
-    "mlx>=0.12",
-    "mlx-nn>=0.12",
+    "mlx>=0.12; sys_platform == 'darwin'",
 ]
 
 [project.scripts]

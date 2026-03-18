@@ -33,7 +33,9 @@ class BackendRegistry:
             cls = _BACKENDS.get(key)
             if cls is None:
                 available = ", ".join(_BACKENDS)
-                raise ValueError(f"Unknown backend '{requested}'. Available: {available}")
+                raise ValueError(
+                    f"Unknown backend '{requested}'. Available: {available}"
+                )
 
             if key == "torch":
                 device = requested.split("-", 1)[1] if "-" in requested else None

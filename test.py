@@ -30,14 +30,23 @@ for arg, value in vars(args).items():
 
 # set parameters
 set_seed(42)
-device = torch.device('cuda')
+if torch.cuda.is_available():
+    device = torch.device('cuda')
+elif torch.backends.mps.is_available():
+    device = torch.device('mps')
+else:
+    device = torch.device('cpu')
 model_id = 'claudiom4sir/StableVSR'
 controlnet_model = ControlNetModel.from_pretrained(args.controlnet_ckpt if args.controlnet_ckpt is not None else model_id, subfolder='controlnet') # your own controlnet model
 pipeline = StableVSRPipeline.from_pretrained(model_id, controlnet=controlnet_model)
 scheduler = DDPMScheduler.from_pretrained(model_id, subfolder='scheduler')
 pipeline.scheduler = scheduler
 pipeline = pipeline.to(device)
-pipeline.enable_xformers_memory_efficient_attention()
+if device.type == 'cuda':
+    try:
+        pipeline.enable_xformers_memory_efficient_attention()
+    except Exception:
+        pass
 of_model = raft_large(weights=Raft_Large_Weights.DEFAULT)
 of_model.requires_grad_(False)
 of_model = of_model.to(device)

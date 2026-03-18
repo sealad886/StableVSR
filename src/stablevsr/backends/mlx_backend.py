@@ -47,8 +47,8 @@ class MLXBackend(Backend):
         )
 
     def default_device(self) -> str:
-        """Return the default MLX device string."""
-        return "gpu"
+        """Return the default MLX device string, or empty if unavailable."""
+        return "gpu" if _MLX_AVAILABLE else ""
 
     def default_dtype_str(self) -> str:
         """Return the default dtype for MLX compute."""

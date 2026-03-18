@@ -171,4 +171,30 @@ class TestVersionConsistency:
         assert version_action is not None
         assert version_action.version is not None
         from stablevsr import __version__
+
         assert __version__ in version_action.version
+
+
+class TestImageExtensionFiltering:
+    """Verify test.py IMAGE_EXTENSIONS constant is importable."""
+
+    def test_image_extensions_defined(self):
+        """test.py should now be importable (main guard) and expose IMAGE_EXTENSIONS."""
+        # test.py has heavy imports (diffusers, torch) at module level that
+        # may not be available in CI, so we just verify the constant exists
+        # by reading the file as text.
+        from pathlib import Path
+        test_py = Path(__file__).parent.parent / "test.py"
+        content = test_py.read_text()
+        assert "IMAGE_EXTENSIONS" in content
+        assert 'if __name__ == "__main__":' in content
+
+
+class TestEvalMainGuard:
+    """Verify eval.py has __main__ guard."""
+
+    def test_eval_has_main_guard(self):
+        from pathlib import Path
+        eval_py = Path(__file__).parent.parent / "eval.py"
+        content = eval_py.read_text()
+        assert 'if __name__ == "__main__":' in content

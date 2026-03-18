@@ -62,6 +62,8 @@ logger = get_logger(__name__)
 
 def image_grid(imgs, rows, cols):
     """Create a single PIL image grid from a list of images."""
+    if not imgs:
+        return Image.new("RGB", (1, 1))
     assert len(imgs) == rows * cols
 
     w, h = imgs[0].size

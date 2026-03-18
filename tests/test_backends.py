@@ -105,3 +105,20 @@ class TestRegistryDeviceSuffixValidation:
         monkeypatch.setenv("STABLEVSR_BACKEND", "nonexistent")
         with pytest.raises(ValueError, match="Unknown backend"):
             get_backend()
+
+
+class TestMLXDefaultDevice:
+    """Adversarial test for MLX default_device when unavailable."""
+
+    def test_default_device_empty_when_unavailable(self, monkeypatch):
+        """If MLX is not available, default_device should return empty string."""
+        import stablevsr.backends.mlx_backend as mod
+        monkeypatch.setattr(mod, "_MLX_AVAILABLE", False)
+        backend = MLXBackend()
+        assert backend.default_device() == ""
+
+    def test_default_device_gpu_when_available(self, monkeypatch):
+        import stablevsr.backends.mlx_backend as mod
+        monkeypatch.setattr(mod, "_MLX_AVAILABLE", True)
+        backend = MLXBackend()
+        assert backend.default_device() == "gpu"

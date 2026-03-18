@@ -107,7 +107,9 @@ def _collect_sequences(input_dir: Path) -> list[tuple[str, Path]]:
     If it contains images directly (no subdirectories), the whole folder is a
     single sequence.
     """
-    subdirs = sorted(p for p in input_dir.iterdir() if p.is_dir() and not p.name.startswith("."))
+    subdirs = sorted(
+        p for p in input_dir.iterdir() if p.is_dir() and not p.name.startswith(".")
+    )
     if subdirs:
         return [(d.name, d) for d in subdirs]
     # Flat folder — treat as a single unnamed sequence
@@ -235,7 +237,9 @@ def build_parser() -> argparse.ArgumentParser:
         prog="stablevsr",
         description="StableVSR: Video super-resolution with temporally-consistent diffusion models",
     )
-    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {__version__}"
+    )
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("backend-info", help="Show available compute backends")

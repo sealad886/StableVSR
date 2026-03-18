@@ -144,7 +144,9 @@ class TestGetFlow:
             def __call__(self, target, source):
                 return [torch.randn(1, 2, 16, 16)]
 
-        result = get_flow(FakeModel(), torch.randn(1, 3, 16, 16), torch.randn(1, 3, 16, 16))
+        result = get_flow(
+            FakeModel(), torch.randn(1, 3, 16, 16), torch.randn(1, 3, 16, 16)
+        )
         assert result.shape == (1, 16, 16, 2)
 
 

@@ -41,6 +41,7 @@ class BackendRegistry:
                 device = requested.split("-", 1)[1] if "-" in requested else None
                 if device is not None:
                     import torch
+
                     valid = {"cpu", "cuda", "mps"}
                     if device not in valid:
                         raise ValueError(

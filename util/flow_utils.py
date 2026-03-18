@@ -16,7 +16,9 @@ def flow_warp(x, flow, interp_mode="bilinear", padding_mode="zeros"):
     assert x.size()[-2:] == flow.size()[1:3]
     _, _, H, W = x.size()
     # mesh grid
-    grid_y, grid_x = torch.meshgrid(torch.arange(0, H), torch.arange(0, W), indexing='ij')
+    grid_y, grid_x = torch.meshgrid(
+        torch.arange(0, H), torch.arange(0, W), indexing="ij"
+    )
     grid = torch.stack((grid_x, grid_y), 2).float()  # W(x), H(y), 2
     grid.requires_grad = False
     grid = grid.type_as(x)

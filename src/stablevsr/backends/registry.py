@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import os
 
 from stablevsr.backends.base import Backend, BackendCapabilities
 from stablevsr.backends.mlx_backend import MLXBackend
 from stablevsr.backends.torch_backend import TorchBackend
+
+log = logging.getLogger(__name__)
 
 _BACKENDS: dict[str, type[Backend]] = {
     "torch": TorchBackend,
@@ -40,26 +43,52 @@ class BackendRegistry:
             if key == "torch":
                 device = requested.split("-", 1)[1] if "-" in requested else None
                 if device is not None:
-                    import torch
-
                     valid = {"cpu", "cuda", "mps"}
                     if device not in valid:
                         raise ValueError(
                             f"Unknown torch device '{device}'. Valid: {', '.join(sorted(valid))}"
                         )
-                return TorchBackend(device=device)
+                backend = TorchBackend(device=device)
+                log.info(
+                    "Backend selected: %s (reason: explicit request '%s')",
+                    backend.name(),
+                    requested,
+                )
+                return backend
             if "-" in requested:
                 raise ValueError(
                     f"Backend '{key}' does not support device suffixes; got '{requested}'"
                 )
-            return cls()
+            inst = cls()
+            log.info(
+                "Backend selected: %s (reason: explicit request '%s')",
+                inst.name(),
+                requested,
+            )
+            return inst
 
         # Auto-detect: prefer MLX if it can actually do inference
+        rejected: list[str] = []
         mlx = MLXBackend()
         if mlx.is_available() and mlx.capabilities().inference:
+            log.info(
+                "Backend selected: mlx (reason: auto-detect, MLX inference available)"
+            )
             return mlx
+        if mlx.is_available():
+            rejected.append("mlx (available but inference not implemented)")
+        else:
+            rejected.append("mlx (not installed)")
 
-        return TorchBackend()
+        backend = TorchBackend()
+        log.info(
+            "Backend selected: %s (reason: auto-detect, best available torch device; "
+            "rejected: %s; default dtype: %s)",
+            backend.name(),
+            ", ".join(rejected) if rejected else "none",
+            backend.default_dtype_str(),
+        )
+        return backend
 
     @staticmethod
     def list_all() -> list[BackendCapabilities]:

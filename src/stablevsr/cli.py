@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import argparse
+import logging
+import platform
+import struct
 import sys
 from pathlib import Path
 
 from stablevsr import __version__
+
+log = logging.getLogger(__name__)
 
 
 def cmd_backend_info(args: argparse.Namespace) -> None:
@@ -24,9 +29,52 @@ def cmd_backend_info(args: argparse.Namespace) -> None:
             print(f"  Note: {note}")
 
 
+def _detect_platform_info() -> dict[str, str]:
+    """Gather platform information for diagnostics."""
+    info: dict[str, str] = {}
+    info["os"] = platform.system()
+    info["os_version"] = (
+        platform.mac_ver()[0] if platform.system() == "Darwin" else platform.version()
+    )
+    info["arch"] = platform.machine()
+    info["python"] = platform.python_version()
+    info["pointer_size"] = str(struct.calcsize("P") * 8)
+
+    if platform.system() == "Darwin":
+        info["is_arm64"] = "yes" if platform.machine() == "arm64" else "no"
+        info["is_rosetta"] = "no"
+        if platform.machine() == "x86_64":
+            try:
+                import subprocess
+
+                result = subprocess.run(
+                    ["sysctl", "-n", "sysctl.proc_translated"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if result.stdout.strip() == "1":
+                    info["is_rosetta"] = "yes"
+            except Exception:
+                info["is_rosetta"] = "unknown"
+    return info
+
+
 def cmd_doctor(args: argparse.Namespace) -> None:
     """Run diagnostic checks."""
     issues: list[str] = []
+
+    # Platform info
+    plat = _detect_platform_info()
+    print(f"[INFO] Platform: {plat['os']} {plat['os_version']} ({plat['arch']})")
+    print(f"[INFO] Python: {plat['python']} ({plat['pointer_size']}-bit)")
+    if plat.get("is_arm64") == "yes":
+        print("[OK] Native Apple Silicon (arm64)")
+    elif plat.get("is_rosetta") == "yes":
+        print("[WARN] Running under Rosetta 2 (x86_64 translation)")
+        issues.append("Running under Rosetta — native arm64 Python recommended")
+    elif plat["os"] == "Darwin" and plat["arch"] == "x86_64":
+        print("[INFO] Intel Mac (x86_64)")
 
     # Check PyTorch
     try:
@@ -74,11 +122,14 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     # Check video I/O
     try:
         import imageio  # noqa: F401
-        import imageio_ffmpeg  # noqa: F401
+        import imageio_ffmpeg
 
-        print("[OK] imageio + ffmpeg available")
+        ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+        print(f"[OK] imageio + ffmpeg available ({ffmpeg_path})")
     except ImportError:
         print("[WARN] imageio/ffmpeg not installed (needed for video I/O)")
+    except Exception:
+        print("[WARN] imageio installed but ffmpeg binary not found")
 
     # Check MLX (optional)
     try:
@@ -128,8 +179,82 @@ def _load_frames(seq_dir: Path) -> tuple[list, list[str]]:
     return [Image.open(p) for p in paths], [p.name for p in paths]
 
 
+VALID_DTYPES = {"float32", "float16", "bfloat16"}
+DTYPE_RESTRICTIONS = {
+    "cpu": {"float32"},
+    "cuda": {"float32", "float16", "bfloat16"},
+    "mps": {"float32", "float16"},
+}
+
+
+def _resolve_dtype(dtype_str: str | None, fp16_flag: bool, device_type: str) -> str:
+    """Resolve the effective dtype string, honoring device restrictions."""
+    if dtype_str and fp16_flag:
+        print("[WARN] Both --dtype and --fp16 specified; --dtype takes precedence")
+
+    if dtype_str is None:
+        dtype_str = "float16" if fp16_flag else "float32"
+
+    allowed = DTYPE_RESTRICTIONS.get(device_type, VALID_DTYPES)
+    if dtype_str not in allowed:
+        print(
+            f"[WARN] dtype '{dtype_str}' not supported on {device_type}; "
+            f"falling back to float32 (allowed: {', '.join(sorted(allowed))})"
+        )
+        dtype_str = "float32"
+
+    log.info("Effective dtype: %s (device: %s)", dtype_str, device_type)
+    return dtype_str
+
+
+def _dtype_str_to_torch(dtype_str: str):
+    """Convert a dtype string to a torch dtype."""
+    import torch
+
+    return {
+        "float32": torch.float32,
+        "float16": torch.float16,
+        "bfloat16": torch.bfloat16,
+    }[dtype_str]
+
+
+def _run_smoke_test(args: argparse.Namespace) -> None:
+    """Validate CLI args and backend selection without loading models."""
+    import torch
+
+    from stablevsr.backends import get_backend
+
+    backend = get_backend(args.backend)
+    device = torch.device(backend.default_device())
+    dtype_str = _resolve_dtype(args.dtype, args.fp16, device.type)
+
+    print("Smoke test passed:")
+    print(f"  Backend:   {backend.name()}")
+    print(f"  Device:    {device}")
+    print(f"  Dtype:     {dtype_str}")
+    print(f"  Model ID:  {args.model_id}")
+    print(f"  Steps:     {args.steps}")
+    print(f"  Seed:      {args.seed}")
+
+    input_dir = Path(args.input)
+    if input_dir.is_dir():
+        sequences = _collect_sequences(input_dir)
+        print(f"  Sequences: {len(sequences)}")
+    else:
+        print(f"  Input:     {args.input} (not found — would fail at runtime)")
+
+
 def cmd_infer(args: argparse.Namespace) -> None:
     """Run video super-resolution inference."""
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(name)s %(levelname)s: %(message)s",
+    )
+
+    if args.smoke_test:
+        _run_smoke_test(args)
+        return
+
     try:
         import torch
     except ImportError:
@@ -166,7 +291,10 @@ def cmd_infer(args: argparse.Namespace) -> None:
     # Backend / device
     backend = get_backend(args.backend)
     device = torch.device(backend.default_device())
-    print(f"Using backend: {backend.name()} (device: {device})")
+    device_type = device.type
+    dtype_str = _resolve_dtype(args.dtype, args.fp16, device_type)
+    dtype = _dtype_str_to_torch(dtype_str)
+    print(f"Using backend: {backend.name()} (device: {device}, dtype: {dtype_str})")
 
     # Seed
     torch.manual_seed(args.seed)
@@ -175,7 +303,6 @@ def cmd_infer(args: argparse.Namespace) -> None:
 
     # Load model
     model_id = args.model_id
-    dtype = torch.float16 if args.fp16 else torch.float32
     controlnet_src = args.controlnet_ckpt if args.controlnet_ckpt else model_id
     print(f"Loading controlnet from: {controlnet_src}")
     controlnet_model = ControlNetModel.from_pretrained(
@@ -284,7 +411,13 @@ def build_parser() -> argparse.ArgumentParser:
     infer_parser.add_argument(
         "--fp16",
         action="store_true",
-        help="Load models in float16 (halves memory usage)",
+        help="Load models in float16 (shortcut for --dtype float16)",
+    )
+    infer_parser.add_argument(
+        "--dtype",
+        default=None,
+        choices=sorted(VALID_DTYPES),
+        help="Model precision (default: float32). Restrictions per device are enforced.",
     )
     infer_parser.add_argument(
         "--vae-tiling",
@@ -300,6 +433,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--cpu-offload",
         action="store_true",
         help="Offload idle models to CPU between forward passes",
+    )
+    infer_parser.add_argument(
+        "--smoke-test",
+        action="store_true",
+        help="Validate args and backend selection without loading models",
+    )
+    infer_parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Enable debug-level logging for backend selection",
     )
 
     return parser

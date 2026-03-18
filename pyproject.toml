@@ -66,6 +66,11 @@ dev = [
 mlx = [
     "mlx>=0.12; sys_platform == 'darwin'",
 ]
+torch = []
+apple = [
+    "stablevsr[video,mlx]",
+]
+rust-ext = []
 
 [project.scripts]
 stablevsr = "stablevsr.cli:main"

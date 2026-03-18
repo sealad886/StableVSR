@@ -175,17 +175,31 @@ def cmd_infer(args: argparse.Namespace) -> None:
 
     # Load model
     model_id = args.model_id
+    dtype = torch.float16 if args.fp16 else torch.float32
     controlnet_src = args.controlnet_ckpt if args.controlnet_ckpt else model_id
     print(f"Loading controlnet from: {controlnet_src}")
     controlnet_model = ControlNetModel.from_pretrained(
-        controlnet_src, subfolder="controlnet"
+        controlnet_src, subfolder="controlnet", torch_dtype=dtype
     )
 
     print(f"Loading pipeline from: {model_id}")
-    pipeline = StableVSRPipeline.from_pretrained(model_id, controlnet=controlnet_model)
+    pipeline = StableVSRPipeline.from_pretrained(
+        model_id, controlnet=controlnet_model, torch_dtype=dtype
+    )
     scheduler = DDPMScheduler.from_pretrained(model_id, subfolder="scheduler")
     pipeline.scheduler = scheduler
     pipeline = pipeline.to(device)
+
+    # Memory optimizations
+    if args.vae_tiling:
+        pipeline.enable_vae_tiling()
+        print("VAE tiling enabled")
+    if args.vae_slicing:
+        pipeline.enable_vae_slicing()
+        print("VAE slicing enabled")
+    if args.cpu_offload:
+        pipeline.enable_model_cpu_offload()
+        print("Model CPU offload enabled")
 
     # xformers — only when available and on CUDA
     if device.type == "cuda":
@@ -266,6 +280,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     infer_parser.add_argument(
         "--backend", default=None, help="Backend override (default: auto)"
+    )
+    infer_parser.add_argument(
+        "--fp16",
+        action="store_true",
+        help="Load models in float16 (halves memory usage)",
+    )
+    infer_parser.add_argument(
+        "--vae-tiling",
+        action="store_true",
+        help="Enable tiled VAE decode/encode (prevents OOM on large images)",
+    )
+    infer_parser.add_argument(
+        "--vae-slicing",
+        action="store_true",
+        help="Enable sliced VAE decoding (reduces peak memory)",
+    )
+    infer_parser.add_argument(
+        "--cpu-offload",
+        action="store_true",
+        help="Offload idle models to CPU between forward passes",
     )
 
     return parser

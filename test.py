@@ -47,6 +47,26 @@ if __name__ == "__main__":
         default=None,
         help="Path to your folder with the controlnet checkpoint.",
     )
+    parser.add_argument(
+        "--fp16",
+        action="store_true",
+        help="Load models in float16 (halves memory usage).",
+    )
+    parser.add_argument(
+        "--vae-tiling",
+        action="store_true",
+        help="Enable tiled VAE decode/encode (prevents OOM on large images).",
+    )
+    parser.add_argument(
+        "--vae-slicing",
+        action="store_true",
+        help="Enable sliced VAE decoding (reduces peak memory).",
+    )
+    parser.add_argument(
+        "--cpu-offload",
+        action="store_true",
+        help="Offload idle models to CPU between forward passes.",
+    )
     args = parser.parse_args()
 
     print("Run with arguments:")
@@ -62,14 +82,27 @@ if __name__ == "__main__":
     else:
         device = torch.device("cpu")
     model_id = "claudiom4sir/StableVSR"
+    dtype = torch.float16 if args.fp16 else torch.float32
     controlnet_model = ControlNetModel.from_pretrained(
         args.controlnet_ckpt if args.controlnet_ckpt is not None else model_id,
         subfolder="controlnet",
+        torch_dtype=dtype,
     )  # your own controlnet model
-    pipeline = StableVSRPipeline.from_pretrained(model_id, controlnet=controlnet_model)
+    pipeline = StableVSRPipeline.from_pretrained(
+        model_id, controlnet=controlnet_model, torch_dtype=dtype
+    )
     scheduler = DDPMScheduler.from_pretrained(model_id, subfolder="scheduler")
     pipeline.scheduler = scheduler
     pipeline = pipeline.to(device)
+    if args.vae_tiling:
+        pipeline.enable_vae_tiling()
+        print("VAE tiling enabled")
+    if args.vae_slicing:
+        pipeline.enable_vae_slicing()
+        print("VAE slicing enabled")
+    if args.cpu_offload:
+        pipeline.enable_model_cpu_offload()
+        print("Model CPU offload enabled")
     if device.type == "cuda":
         try:
             pipeline.enable_xformers_memory_efficient_attention()
@@ -83,7 +116,8 @@ if __name__ == "__main__":
     seqs = sorted(os.listdir(args.in_path))
     for seq in seqs:
         frame_names = sorted(
-            f for f in os.listdir(os.path.join(args.in_path, seq))
+            f
+            for f in os.listdir(os.path.join(args.in_path, seq))
             if Path(f).suffix.lower() in IMAGE_EXTENSIONS
         )
         frames = []

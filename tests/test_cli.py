@@ -184,6 +184,7 @@ class TestImageExtensionFiltering:
         # may not be available in CI, so we just verify the constant exists
         # by reading the file as text.
         from pathlib import Path
+
         test_py = Path(__file__).parent.parent / "test.py"
         content = test_py.read_text()
         assert "IMAGE_EXTENSIONS" in content
@@ -195,6 +196,69 @@ class TestEvalMainGuard:
 
     def test_eval_has_main_guard(self):
         from pathlib import Path
+
         eval_py = Path(__file__).parent.parent / "eval.py"
         content = eval_py.read_text()
         assert 'if __name__ == "__main__":' in content
+
+
+class TestBenchmarkParser:
+    """Tests for the benchmark subcommand parser."""
+
+    def test_parse_benchmark_defaults(self):
+        parser = build_parser()
+        args = parser.parse_args(["benchmark"])
+        assert args.command == "benchmark"
+        assert args.steps == 3
+        assert args.frames == 2
+        assert args.resolution == "128x128"
+        assert args.dtype == "float32"
+        assert args.warmup == 0
+        assert args.output is None
+
+    def test_parse_benchmark_custom_args(self):
+        parser = build_parser()
+        args = parser.parse_args([
+            "benchmark",
+            "--steps", "5",
+            "--frames", "4",
+            "--resolution", "256x256",
+            "--dtype", "float16",
+            "--warmup", "1",
+            "--output", "/tmp/bench.json",
+        ])
+        assert args.steps == 5
+        assert args.frames == 4
+        assert args.resolution == "256x256"
+        assert args.dtype == "float16"
+        assert args.warmup == 1
+        assert args.output == "/tmp/bench.json"
+
+
+class TestHelperFunctions:
+    """Tests for _sync and _peak_rss_mb."""
+
+    def test_peak_rss_returns_positive(self):
+        from stablevsr.cli import _peak_rss_mb
+
+        rss = _peak_rss_mb()
+        assert rss is None or rss > 0
+
+    def test_sync_noop_on_cpu(self):
+        from stablevsr.cli import _sync
+
+        _sync("cpu")  # should not raise
+
+
+class TestMPSAutoDefaults:
+    """Test that MPS auto-defaults are mentioned in infer command code."""
+
+    def test_infer_has_mps_auto_tiling(self):
+        import inspect
+
+        from stablevsr.cli import cmd_infer
+
+        src = inspect.getsource(cmd_infer)
+        assert "auto-enabled (MPS)" in src
+        assert "enable_vae_tiling" in src
+        assert "enable_attention_slicing" in src

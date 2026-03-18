@@ -1,6 +1,21 @@
 import torch
 import torch.nn.functional as F
 
+_grid_cache: dict[tuple[int, int, str, str], torch.Tensor] = {}
+
+
+def _get_base_grid(H: int, W: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+    key = (H, W, str(device), str(dtype))
+    cached = _grid_cache.get(key)
+    if cached is not None:
+        return cached
+    grid_y, grid_x = torch.meshgrid(
+        torch.arange(0, H), torch.arange(0, W), indexing="ij"
+    )
+    grid = torch.stack((grid_x, grid_y), 2).to(device=device, dtype=dtype)
+    _grid_cache[key] = grid
+    return grid
+
 
 def flow_warp(x, flow, interp_mode="bilinear", padding_mode="zeros"):
     """Warp an image or feature map with optical flow
@@ -15,13 +30,7 @@ def flow_warp(x, flow, interp_mode="bilinear", padding_mode="zeros"):
     """
     assert x.size()[-2:] == flow.size()[1:3]
     _, _, H, W = x.size()
-    # mesh grid
-    grid_y, grid_x = torch.meshgrid(
-        torch.arange(0, H), torch.arange(0, W), indexing="ij"
-    )
-    grid = torch.stack((grid_x, grid_y), 2).float()  # W(x), H(y), 2
-    grid.requires_grad = False
-    grid = grid.type_as(x)
+    grid = _get_base_grid(H, W, x.device, x.dtype)
     vgrid = grid + flow
     # scale grid to [-1,1]
     vgrid_x = 2.0 * vgrid[:, :, :, 0] / max(W - 1, 1) - 1.0

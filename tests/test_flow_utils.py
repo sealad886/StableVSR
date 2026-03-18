@@ -3,6 +3,8 @@
 import torch
 
 from util.flow_utils import (
+    _get_base_grid,
+    _grid_cache,
     compute_flow_gradients,
     compute_flow_magnitude,
     detect_occlusion,
@@ -48,6 +50,31 @@ class TestFlowWarp:
         flow = torch.zeros(1, 16, 16, 2, device="cpu")
         out = flow_warp(x, flow)
         assert out.device.type == "cpu"
+
+
+class TestGridCache:
+    def test_cache_returns_same_tensor(self):
+        _grid_cache.clear()
+        g1 = _get_base_grid(16, 16, torch.device("cpu"), torch.float32)
+        g2 = _get_base_grid(16, 16, torch.device("cpu"), torch.float32)
+        assert g1 is g2
+
+    def test_cache_keys_differ_by_shape(self):
+        _grid_cache.clear()
+        g1 = _get_base_grid(16, 16, torch.device("cpu"), torch.float32)
+        g2 = _get_base_grid(32, 32, torch.device("cpu"), torch.float32)
+        assert g1 is not g2
+        assert g1.shape == (16, 16, 2)
+        assert g2.shape == (32, 32, 2)
+
+    def test_flow_warp_uses_cache(self):
+        _grid_cache.clear()
+        x = torch.randn(1, 3, 16, 16)
+        flow = torch.zeros(1, 16, 16, 2)
+        flow_warp(x, flow)
+        assert len(_grid_cache) >= 1
+        flow_warp(x, flow)
+        assert len(_grid_cache) == 1  # no new entries
 
 
 class TestComputeFlowMagnitude:

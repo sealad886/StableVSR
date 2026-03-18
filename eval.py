@@ -137,7 +137,6 @@ if __name__ == "__main__":
             prev_gt = gt
             pbar.update()
 
-
     pbar.close()
     mean_lpips = np.round(
         np.mean([np.mean(lpips_dict[key]) for key in lpips_dict.keys()]), 3
@@ -145,19 +144,31 @@ if __name__ == "__main__":
     mean_dists = np.round(
         np.mean([np.mean(dists_dict[key]) for key in dists_dict.keys()]), 3
     )
-    mean_psnr = np.round(np.mean([np.mean(psnr_dict[key]) for key in psnr_dict.keys()]), 2)
-    mean_ssim = np.round(np.mean([np.mean(ssim_dict[key]) for key in ssim_dict.keys()]), 3)
+    mean_psnr = np.round(
+        np.mean([np.mean(psnr_dict[key]) for key in psnr_dict.keys()]), 2
+    )
+    mean_ssim = np.round(
+        np.mean([np.mean(ssim_dict[key]) for key in ssim_dict.keys()]), 3
+    )
     mean_musiq = np.round(
         np.mean([np.mean(musiq_dict[key]) for key in musiq_dict.keys()]), 2
     )
-    mean_niqe = np.round(np.mean([np.mean(niqe_dict[key]) for key in niqe_dict.keys()]), 2)
-    mean_clip = np.round(np.mean([np.mean(clip_dict[key]) for key in clip_dict.keys()]), 3)
-    mean_tlpips = np.round(
-        np.mean([np.mean(v) for v in tlpips_dict.values() if v]) * 1e3, 2
-    ) if any(tlpips_dict.values()) else 0.0
-    mean_tof = np.round(
-        np.mean([np.mean(v) for v in tof_dict.values() if v]) * 1e1, 3
-    ) if any(tof_dict.values()) else 0.0
+    mean_niqe = np.round(
+        np.mean([np.mean(niqe_dict[key]) for key in niqe_dict.keys()]), 2
+    )
+    mean_clip = np.round(
+        np.mean([np.mean(clip_dict[key]) for key in clip_dict.keys()]), 3
+    )
+    mean_tlpips = (
+        np.round(np.mean([np.mean(v) for v in tlpips_dict.values() if v]) * 1e3, 2)
+        if any(tlpips_dict.values())
+        else 0.0
+    )
+    mean_tof = (
+        np.round(np.mean([np.mean(v) for v in tof_dict.values() if v]) * 1e1, 3)
+        if any(tof_dict.values())
+        else 0.0
+    )
 
     print(
         f"PSNR: {mean_psnr}, SSIM: {mean_ssim}, LPIPS: {mean_lpips}, DISTS: {mean_dists}, MUSIQ: {mean_musiq}, CLIP: {mean_clip}, NIQE: {mean_niqe}, tLPIPS: {mean_tlpips}, tOF: {mean_tof}"

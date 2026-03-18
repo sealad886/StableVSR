@@ -317,7 +317,17 @@ def cmd_infer(args: argparse.Namespace) -> None:
     pipeline.scheduler = scheduler
     pipeline = pipeline.to(device)
 
-    # Memory optimizations
+    # Memory optimizations — auto-enable MPS safety defaults
+    if device.type == "mps":
+        if not args.vae_tiling:
+            pipeline.enable_vae_tiling()
+            print("VAE tiling auto-enabled (MPS)")
+        if not args.cpu_offload:
+            pipeline.enable_model_cpu_offload()
+            print("CPU offload auto-enabled (MPS)")
+        pipeline.enable_attention_slicing()
+        print("Attention slicing auto-enabled (MPS)")
+
     if args.vae_tiling:
         pipeline.enable_vae_tiling()
         print("VAE tiling enabled")
@@ -336,11 +346,11 @@ def cmd_infer(args: argparse.Namespace) -> None:
         except Exception:
             pass
 
-    # Optical flow model
+    # Optical flow model — RAFT must stay float32 on MPS
     print("Loading RAFT optical-flow model")
     of_model = raft_large(weights=Raft_Large_Weights.DEFAULT)
     of_model.requires_grad_(False)
-    of_model = of_model.to(device)
+    of_model = of_model.to(device, dtype=torch.float32)
 
     # Collect sequences
     sequences = _collect_sequences(input_dir)
@@ -370,6 +380,168 @@ def cmd_infer(args: argparse.Namespace) -> None:
         print(f"  Saved {len(sr_frames)} frames to {target_dir}")
 
     print("Done.")
+
+
+def _sync(device_type: str) -> None:
+    """Block until the accelerator finishes outstanding work."""
+    import torch
+
+    if device_type == "cuda":
+        torch.cuda.synchronize()
+    elif device_type == "mps":
+        torch.mps.synchronize()
+
+
+def _peak_rss_mb() -> float | None:
+    """Return peak RSS in MiB (macOS/Linux) or *None* on failure."""
+    try:
+        import resource
+
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 * 1024)
+    except Exception:
+        return None
+
+
+def cmd_benchmark(args: argparse.Namespace) -> None:  # noqa: C901
+    """Run a synthetic benchmark of the full StableVSR pipeline."""
+    import json
+    import time
+
+    import numpy as np
+    import torch
+    from PIL import Image
+
+    # Ensure project root is importable for pipeline package.
+    project_root = str(Path(__file__).resolve().parents[2])
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+
+    from diffusers import ControlNetModel, DDPMScheduler
+    from torchvision.models.optical_flow import Raft_Large_Weights, raft_large
+
+    from pipeline.stablevsr_pipeline import StableVSRPipeline
+
+    # Parse resolution
+    try:
+        w_str, h_str = args.resolution.split("x")
+        width, height = int(w_str), int(h_str)
+    except ValueError:
+        print(f"[ERROR] Invalid resolution '{args.resolution}'. Use WxH, e.g. 128x128")
+        sys.exit(1)
+
+    dtype_str: str = args.dtype
+    dtype = _dtype_str_to_torch(dtype_str)
+    model_id: str = args.model_id
+    num_steps: int = args.steps
+    num_frames: int = args.frames
+    warmup: int = args.warmup
+
+    # Detect device
+    if torch.backends.mps.is_available():
+        device = torch.device("mps")
+    elif torch.cuda.is_available():
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cpu")
+    device_type = device.type
+
+    print(f"Benchmark: {width}x{height}, {num_frames} frames, {num_steps} steps, "
+          f"dtype={dtype_str}, device={device_type}")
+
+    timings: dict[str, float] = {}
+    t_total_start = time.perf_counter()
+
+    # --- Stage: model_load ---
+    _sync(device_type)
+    t0 = time.perf_counter()
+
+    controlnet = ControlNetModel.from_pretrained(
+        model_id, subfolder="controlnet", torch_dtype=dtype,
+    )
+    pipeline = StableVSRPipeline.from_pretrained(
+        model_id, controlnet=controlnet, torch_dtype=dtype,
+    )
+    scheduler = DDPMScheduler.from_pretrained(model_id, subfolder="scheduler")
+    pipeline.scheduler = scheduler
+    pipeline = pipeline.to(device)
+
+    of_model = raft_large(weights=Raft_Large_Weights.DEFAULT)
+    of_model.requires_grad_(False)
+    # RAFT must stay float32 on MPS
+    of_model = of_model.to(device, dtype=torch.float32)
+
+    _sync(device_type)
+    timings["model_load"] = time.perf_counter() - t0
+    print(f"  model_load: {timings['model_load']:.2f}s")
+
+    # --- Stage: pipeline_config ---
+    _sync(device_type)
+    t0 = time.perf_counter()
+
+    pipeline.enable_model_cpu_offload()
+    if device_type == "mps":
+        pipeline.enable_attention_slicing()
+        pipeline.enable_vae_tiling()
+
+    _sync(device_type)
+    timings["pipeline_config"] = time.perf_counter() - t0
+    print(f"  pipeline_config: {timings['pipeline_config']:.2f}s")
+
+    # Synthetic frames
+    rng = np.random.default_rng(42)
+    frames = [
+        Image.fromarray(rng.integers(0, 256, (height, width, 3), dtype=np.uint8))
+        for _ in range(num_frames)
+    ]
+
+    # Optional warmup iterations
+    for wi in range(warmup):
+        print(f"  warmup {wi + 1}/{warmup} ...")
+        pipeline("", frames, num_inference_steps=num_steps, guidance_scale=0, of_model=of_model)
+        _sync(device_type)
+
+    # --- Stage: inference ---
+    _sync(device_type)
+    t0 = time.perf_counter()
+
+    pipeline("", frames, num_inference_steps=num_steps, guidance_scale=0, of_model=of_model)
+
+    _sync(device_type)
+    timings["inference"] = time.perf_counter() - t0
+    print(f"  inference: {timings['inference']:.2f}s")
+
+    timings["total"] = time.perf_counter() - t_total_start
+
+    peak_rss = _peak_rss_mb()
+
+    # Human-readable report
+    print("\n--- Benchmark Report ---")
+    print(f"  Backend:    {device_type}")
+    print(f"  Dtype:      {dtype_str}")
+    print(f"  Resolution: {width}x{height}")
+    print(f"  Frames:     {num_frames}")
+    print(f"  Steps:      {num_steps}")
+    for stage, secs in timings.items():
+        print(f"  {stage:20s} {secs:8.2f}s")
+    if peak_rss is not None:
+        print(f"  Peak RSS:   {peak_rss:.1f} MiB")
+
+    # Optional JSON output
+    if args.output:
+        report = {
+            "backend": device_type,
+            "dtype": dtype_str,
+            "resolution": f"{width}x{height}",
+            "frames": num_frames,
+            "steps": num_steps,
+            "warmup": warmup,
+            "timings": timings,
+            "peak_rss_mib": peak_rss,
+        }
+        out_path = Path(args.output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(report, indent=2) + "\n")
+        print(f"\nJSON report saved to {out_path}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -446,6 +618,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="Enable debug-level logging for backend selection",
     )
 
+    # -- benchmark subcommand --
+    bench_p = sub.add_parser("benchmark", help="Run a synthetic pipeline benchmark")
+    bench_p.add_argument(
+        "--steps", type=int, default=3, help="Inference steps (default: 3)",
+    )
+    bench_p.add_argument(
+        "--frames", type=int, default=2, help="Number of synthetic frames (default: 2)",
+    )
+    bench_p.add_argument(
+        "--resolution", default="128x128", help="Frame resolution WxH (default: 128x128)",
+    )
+    bench_p.add_argument(
+        "--dtype", default="float32", choices=sorted(VALID_DTYPES),
+        help="Model precision (default: float32)",
+    )
+    bench_p.add_argument(
+        "--warmup", type=int, default=0, help="Warmup iterations before timed run (default: 0)",
+    )
+    bench_p.add_argument(
+        "--output", default=None, help="Optional path for JSON report output",
+    )
+    bench_p.add_argument(
+        "--model-id", default="claudiom4sir/StableVSR", help="Model ID or local path",
+    )
+
     return parser
 
 
@@ -460,6 +657,8 @@ def main() -> None:
         cmd_doctor(args)
     elif args.command == "infer":
         cmd_infer(args)
+    elif args.command == "benchmark":
+        cmd_benchmark(args)
     else:
         parser.print_help()
         sys.exit(1)

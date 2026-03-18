@@ -56,10 +56,10 @@ def compute_flow_gradients(flow):
     H = flow.shape[1]
     W = flow.shape[2]
 
-    flow_x_du = torch.zeros((B, H, W)).to('cuda')
-    flow_x_dv = torch.zeros((B, H, W)).to('cuda')
-    flow_y_du = torch.zeros((B, H, W)).to('cuda')
-    flow_y_dv = torch.zeros((B, H, W)).to('cuda')
+    flow_x_du = torch.zeros((B, H, W)).to(flow.device)
+    flow_x_dv = torch.zeros((B, H, W)).to(flow.device)
+    flow_y_du = torch.zeros((B, H, W)).to(flow.device)
+    flow_y_dv = torch.zeros((B, H, W)).to(flow.device)
     
     flow_x = flow[:, :, :, 0]
     flow_y = flow[:, :, :, 1]
@@ -100,7 +100,7 @@ def detect_occlusion(fw_flow, bw_flow):
 
     ## combine mask
     mask = torch.logical_or(mask1, mask2)
-    occlusion = torch.ones((fw_flow.shape[0], fw_flow.shape[1], fw_flow.shape[2])).to('cuda')
+    occlusion = torch.ones((fw_flow.shape[0], fw_flow.shape[1], fw_flow.shape[2])).to(fw_flow.device)
     occlusion[mask == 1] = 0
 
     return occlusion

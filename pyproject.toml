@@ -1,0 +1,88 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "stablevsr"
+version = "0.1.0"
+description = "Video super-resolution through temporally-consistent detail synthesis using diffusion models (ECCV 2024)"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [
+    { name = "Claudio Rota" },
+    { name = "Marco Buzzelli" },
+    { name = "Joost van de Weijer" },
+]
+keywords = ["video-super-resolution", "diffusion-models", "controlnet", "temporal-consistency"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+dependencies = [
+    "torch>=2.0",
+    "torchvision>=0.15",
+    "diffusers>=0.21",
+    "transformers>=4.33",
+    "accelerate>=0.23",
+    "safetensors>=0.4",
+    "numpy>=1.24",
+    "Pillow>=10.0",
+    "tqdm>=4.60",
+    "packaging>=24.0",
+]
+
+[project.optional-dependencies]
+video = [
+    "imageio>=2.31",
+    "imageio-ffmpeg>=0.5",
+]
+train = [
+    "basicsr>=1.4",
+    "omegaconf>=2.3",
+    "einops>=0.8",
+    "bitsandbytes>=0.43",
+    "wandb",
+    "tensorboard",
+]
+eval = [
+    "torchmetrics>=1.1",
+    "pyiqa>=0.1.7",
+    "DISTS-pytorch>=0.1",
+]
+dev = [
+    "stablevsr[video,eval]",
+    "pytest>=7.0",
+    "ruff>=0.4",
+]
+mlx = [
+    "mlx>=0.12",
+    "mlx-nn>=0.12",
+]
+
+[project.scripts]
+stablevsr = "stablevsr.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/claudiom4sir/StableVSR"
+Paper = "https://arxiv.org/abs/2311.15908"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stablevsr"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

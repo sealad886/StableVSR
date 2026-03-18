@@ -2,3 +2,6 @@
 # Dolt database files (added by bd init)
 .dolt/
 *.db
+
+# E2E test artifacts (large generated frames/videos)
+e2e_test/

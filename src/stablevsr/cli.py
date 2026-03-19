@@ -674,7 +674,227 @@ def build_parser() -> argparse.ArgumentParser:
         help="Model ID or local path",
     )
 
+    # -- mlx-infer subcommand --
+    from stablevsr.mlx.presets import PRESET_NAMES
+
+    mlx_p = sub.add_parser(
+        "mlx-infer",
+        help="Run MLX inference with preset or custom optimization settings",
+    )
+    mlx_p.add_argument("--input", required=True, help="Input folder of LR frames")
+    mlx_p.add_argument("--output", required=True, help="Output folder for SR results")
+    mlx_p.add_argument(
+        "--model-path",
+        default="models/StableVSR",
+        help="Local HuggingFace cache path (default: models/StableVSR)",
+    )
+    mlx_p.add_argument(
+        "--preset",
+        default=None,
+        choices=PRESET_NAMES,
+        help="Optimization preset (overridden by explicit flags)",
+    )
+    mlx_p.add_argument(
+        "--steps", type=int, default=50, help="Inference steps (default: 50)"
+    )
+    mlx_p.add_argument("--seed", type=int, default=42, help="Random seed (default: 42)")
+    mlx_p.add_argument(
+        "--compile", action="store_true", default=None,
+        help="Enable mx.compile for UNet/ControlNet",
+    )
+    mlx_p.add_argument(
+        "--no-compile", action="store_true",
+        help="Disable mx.compile",
+    )
+    mlx_p.add_argument(
+        "--ttg-start-step", type=int, default=None,
+        help="Step at which temporal texture guidance begins",
+    )
+    mlx_p.add_argument(
+        "--chunk-size", type=int, default=None,
+        help="Frames per temporal chunk (enables chunked inference)",
+    )
+    mlx_p.add_argument(
+        "--chunk-overlap", type=int, default=None,
+        help="Overlapping frames between adjacent chunks",
+    )
+    mlx_p.add_argument(
+        "--resume", action="store_true",
+        help="Resume from a previous incomplete chunked run",
+    )
+    mlx_p.add_argument(
+        "--dry-run", action="store_true",
+        help="Plan chunks and print summary without running inference",
+    )
+    mlx_p.add_argument(
+        "--force-tiled-vae", action="store_true", default=None,
+        help="Force tiled VAE decode",
+    )
+    mlx_p.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
+
     return parser
+
+
+def cmd_mlx_infer(args: argparse.Namespace) -> None:
+    """Run MLX inference (with optional chunking and presets)."""
+    import time
+
+    import numpy as np
+    from PIL import Image
+
+    from stablevsr.mlx.presets import (
+        check_guardrails,
+        get_preset,
+        log_guardrails,
+    )
+
+    if args.verbose:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+    input_dir = Path(args.input)
+    output_dir = Path(args.output)
+
+    if not input_dir.is_dir():
+        log.error("Input directory does not exist: %s", input_dir)
+        sys.exit(1)
+
+    # Load frames
+    frame_paths = sorted(
+        p for p in input_dir.iterdir()
+        if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".bmp", ".tiff")
+    )
+    if not frame_paths:
+        log.error("No image files found in %s", input_dir)
+        sys.exit(1)
+
+    images = [np.array(Image.open(p).convert("RGB")) for p in frame_paths]
+    log.info("Loaded %d frames from %s (%s)", len(images), input_dir, images[0].shape)
+
+    h, w = images[0].shape[:2]
+
+    # Resolve preset + explicit overrides
+    compile_models = False
+    ttg_start_step = 0
+    chunk_size = None
+    chunk_overlap = 0
+    force_tiled_vae = args.force_tiled_vae
+
+    if args.preset:
+        preset = get_preset(args.preset)
+        compile_models = preset.compile_models
+        ttg_start_step = preset.resolve_ttg_start_step(args.steps)
+        chunk_size = preset.chunk_size
+        chunk_overlap = preset.chunk_overlap
+        force_tiled_vae = preset.force_tiled_vae if force_tiled_vae is None else force_tiled_vae
+
+    # Explicit flags override preset
+    if args.compile is True:
+        compile_models = True
+    if args.no_compile:
+        compile_models = False
+    if args.ttg_start_step is not None:
+        ttg_start_step = args.ttg_start_step
+    if args.chunk_size is not None:
+        chunk_size = args.chunk_size
+    if args.chunk_overlap is not None:
+        chunk_overlap = args.chunk_overlap
+
+    # Guardrails
+    warnings = check_guardrails(
+        num_frames=len(images),
+        height=h,
+        width=w,
+        num_inference_steps=args.steps,
+        ttg_start_step=ttg_start_step,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        compile_models=compile_models,
+        force_tiled_vae=force_tiled_vae,
+    )
+    has_errors = log_guardrails(warnings)
+    if has_errors:
+        log.error("Guardrail errors detected — aborting. Use explicit flags to override.")
+        sys.exit(1)
+
+    # Load pipeline + RAFT
+    log.info("Loading MLX pipeline...")
+    import mlx.core as mx
+
+    from stablevsr.mlx.pipeline import MLXStableVSRPipeline
+
+    model_path = Path(args.model_path)
+    snapshot_dirs = sorted(model_path.rglob("snapshots/*/"))
+    if snapshot_dirs:
+        model_path = snapshot_dirs[-1]
+
+    pipe = MLXStableVSRPipeline.from_pretrained(str(model_path), dtype=mx.float16)
+
+    log.info("Loading RAFT optical flow model...")
+    from stablevsr.mlx.flow.raft_bridge import load_raft_model
+    raft_model = load_raft_model()
+
+    # Build common kwargs
+    common_kwargs = dict(
+        prompt="clean, high-resolution, 8k, sharp, details",
+        negative_prompt="blurry, noise, low-resolution, artifacts",
+        num_inference_steps=args.steps,
+        guidance_scale=7.5,
+        controlnet_conditioning_scale=1.0,
+        seed=args.seed,
+        compile_models=compile_models,
+        ttg_start_step=ttg_start_step,
+        force_tiled_vae=force_tiled_vae,
+    )
+
+    t0 = time.perf_counter()
+
+    if chunk_size is not None and chunk_size < len(images):
+        # Chunked inference
+        from stablevsr.mlx.chunked_pipeline import run_chunked_inference
+
+        def _progress(chunk_idx: int, total: int, msg: str) -> None:
+            log.info("[%d/%d] %s", chunk_idx, total, msg)
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sr_frames = run_chunked_inference(
+            pipeline=pipe,
+            images=images,
+            of_model=raft_model,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            output_dir=output_dir,
+            resume=args.resume,
+            dry_run=args.dry_run,
+            progress_callback=_progress,
+            **common_kwargs,
+        )
+    else:
+        # Single-shot inference
+        if args.dry_run:
+            log.info("Dry run: %d frames, no chunking needed.", len(images))
+            return
+
+        result = pipe(images=images, of_model=raft_model, **common_kwargs)
+        sr_frames = result.frames
+
+    elapsed = time.perf_counter() - t0
+
+    if not sr_frames:
+        log.info("No output (dry run or empty input).")
+        return
+
+    # Save outputs
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for i, frame in enumerate(sr_frames):
+        out_path = output_dir / f"frame_{i:06d}.png"
+        Image.fromarray(frame).save(out_path)
+
+    log.info(
+        "Done: %d frames in %.1fs (%.1f s/frame), saved to %s",
+        len(sr_frames), elapsed, elapsed / len(sr_frames), output_dir,
+    )
 
 
 def main() -> None:
@@ -690,6 +910,8 @@ def main() -> None:
         cmd_infer(args)
     elif args.command == "benchmark":
         cmd_benchmark(args)
+    elif args.command == "mlx-infer":
+        cmd_mlx_infer(args)
     else:
         parser.print_help()
         sys.exit(1)

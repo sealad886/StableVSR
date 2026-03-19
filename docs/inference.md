@@ -178,6 +178,84 @@ Prints resolved backend, device, dtype, and sequence count — loads nothing.
 | 16+ GB VRAM | `--fp16` |
 | 8–12 GB VRAM | `--fp16 --vae-tiling` |
 | < 8 GB VRAM | `--fp16 --vae-tiling --vae-slicing --cpu-offload` |
+
+---
+
+## MLX Inference (Apple Silicon)
+
+For native Apple Silicon inference without PyTorch, use the `mlx-infer` subcommand:
+
+```bash
+stablevsr mlx-infer --input ./lr_frames --output ./sr_output
+```
+
+### Preset-Based Usage
+
+Presets bundle optimization settings for common use cases:
+
+```bash
+# Safe: bounded memory, full quality
+stablevsr mlx-infer --input ./lr --output ./sr --preset safe
+
+# Balanced: moderate speed/quality tradeoff
+stablevsr mlx-infer --input ./lr --output ./sr --preset balanced
+
+# Fast: maximum speed
+stablevsr mlx-infer --input ./lr --output ./sr --preset fast
+
+# Max quality: reference output, no chunking
+stablevsr mlx-infer --input ./lr --output ./sr --preset max-quality --steps 50
+```
+
+See [Quality Tradeoffs](quality_tradeoffs.md) for detailed preset comparison.
+
+### Long Video (Chunked Inference)
+
+For videos exceeding available memory, chunked inference splits the sequence
+into overlapping temporal chunks:
+
+```bash
+# Preset handles chunking automatically
+stablevsr mlx-infer --input ./long_video --output ./sr --preset safe
+
+# Or set chunk size explicitly
+stablevsr mlx-infer --input ./long_video --output ./sr \
+    --chunk-size 16 --chunk-overlap 4 --compile
+```
+
+Resume interrupted runs:
+```bash
+stablevsr mlx-infer --input ./long_video --output ./sr --preset safe --resume
+```
+
+Preview chunk plan without running:
+```bash
+stablevsr mlx-infer --input ./long_video --output ./sr --preset safe --dry-run
+```
+
+### MLX CLI Reference
+
+```
+stablevsr mlx-infer [OPTIONS]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--input PATH` | *(required)* | Input directory of LR frames |
+| `--output PATH` | *(required)* | Output directory for SR results |
+| `--model-path PATH` | `models/StableVSR` | Local model cache path |
+| `--preset NAME` | *(none)* | One of: `max-quality`, `safe`, `balanced`, `fast` |
+| `--steps N` | `50` | Diffusion steps |
+| `--seed N` | `42` | Random seed |
+| `--compile` | *(off)* | Enable JIT compilation |
+| `--no-compile` | *(off)* | Disable JIT compilation |
+| `--ttg-start-step N` | `0` | TTG start step override |
+| `--chunk-size N` | *(none)* | Frames per chunk |
+| `--chunk-overlap N` | *(none)* | Overlap between chunks |
+| `--resume` | *(off)* | Resume from manifest |
+| `--dry-run` | *(off)* | Plan only, no inference |
+| `--force-tiled-vae` | *(off)* | Force tiled VAE decode |
+| `-v` / `--verbose` | *(off)* | Debug logging |
 | Apple Silicon (unified memory) | `--backend torch-mps --fp16` |
 | CPU-only machine | `--backend torch-cpu` (float32, slow) |
 

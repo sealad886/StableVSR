@@ -608,9 +608,9 @@ class TestSpatialReconciliation:
             hidden = mx.random.normal(hidden_shape)
             target = mx.random.normal(target_shape)
             result = self.fn(hidden, target)
-            assert result.shape == target_shape, (
-                f"Expected {target_shape}, got {result.shape}"
-            )
+            assert (
+                result.shape == target_shape
+            ), f"Expected {target_shape}, got {result.shape}"
 
     def test_raises_when_hidden_smaller(self):
         """If upsampled tensor is smaller than skip, it's a structural bug."""
@@ -651,10 +651,10 @@ class TestTiledVAEDecode:
 
     def setup_method(self):
         from stablevsr.mlx.models.vae import (
-            AutoencoderKL,
             DEFAULT_TILE_OVERLAP,
             DEFAULT_TILE_SIZE,
             TILED_DECODE_LATENT_AREA_THRESHOLD,
+            AutoencoderKL,
         )
 
         self.AutoencoderKL = AutoencoderKL

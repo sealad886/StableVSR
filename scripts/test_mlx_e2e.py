@@ -76,7 +76,7 @@ def main():
         controlnet_conditioning_scale=1.0,
         seed=42,
         progress_callback=progress,
-    )
+    ).frames
     t_run = time.time() - t0
     logger.info(f"Pipeline done in {t_run:.1f}s")
 

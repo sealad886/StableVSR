@@ -30,72 +30,102 @@ SCENARIOS = [
     {
         "name": "smoke-160x90-1f-notile",
         "resolution": (160, 90),
-        "frames": 1, "steps": 2,
-        "force_tiled": False, "dtype": "float16",
-        "compile": False, "ttg_start": 0,
+        "frames": 1,
+        "steps": 2,
+        "force_tiled": False,
+        "dtype": "float16",
+        "compile": False,
+        "ttg_start": 0,
     },
     {
         "name": "smoke-160x90-1f-tiled",
         "resolution": (160, 90),
-        "frames": 1, "steps": 2,
-        "force_tiled": True, "dtype": "float16",
-        "compile": False, "ttg_start": 0,
+        "frames": 1,
+        "steps": 2,
+        "force_tiled": True,
+        "dtype": "float16",
+        "compile": False,
+        "ttg_start": 0,
     },
     {
         "name": "native-480x270-2f-tiled",
         "resolution": None,
-        "frames": 2, "steps": 2,
-        "force_tiled": None, "dtype": "float16",
-        "compile": False, "ttg_start": 0,
+        "frames": 2,
+        "steps": 2,
+        "force_tiled": None,
+        "dtype": "float16",
+        "compile": False,
+        "ttg_start": 0,
     },
     {
         "name": "native-480x270-2f-compiled",
         "resolution": None,
-        "frames": 2, "steps": 2,
-        "force_tiled": None, "dtype": "float16",
-        "compile": True, "ttg_start": 0,
+        "frames": 2,
+        "steps": 2,
+        "force_tiled": None,
+        "dtype": "float16",
+        "compile": True,
+        "ttg_start": 0,
     },
     {
         "name": "native-480x270-2f-ttg1",
         "resolution": None,
-        "frames": 2, "steps": 2,
-        "force_tiled": None, "dtype": "float16",
-        "compile": False, "ttg_start": 1,
+        "frames": 2,
+        "steps": 2,
+        "force_tiled": None,
+        "dtype": "float16",
+        "compile": False,
+        "ttg_start": 1,
     },
     {
         "name": "native-480x270-2f-compiled-ttg1",
         "resolution": None,
-        "frames": 2, "steps": 2,
-        "force_tiled": None, "dtype": "float16",
-        "compile": True, "ttg_start": 1,
+        "frames": 2,
+        "steps": 2,
+        "force_tiled": None,
+        "dtype": "float16",
+        "compile": True,
+        "ttg_start": 1,
     },
     {
         "name": "native-480x270-2f-notile",
         "resolution": None,
-        "frames": 2, "steps": 2,
-        "force_tiled": False, "dtype": "float16",
-        "compile": False, "ttg_start": 0,
+        "frames": 2,
+        "steps": 2,
+        "force_tiled": False,
+        "dtype": "float16",
+        "compile": False,
+        "ttg_start": 0,
     },
     {
         "name": "native-480x270-2f-5step",
         "resolution": None,
-        "frames": 2, "steps": 5,
-        "force_tiled": None, "dtype": "float16",
-        "compile": False, "ttg_start": 0,
+        "frames": 2,
+        "steps": 5,
+        "force_tiled": None,
+        "dtype": "float16",
+        "compile": False,
+        "ttg_start": 0,
     },
     {
         "name": "native-480x270-5f-tiled",
         "resolution": None,
-        "frames": 5, "steps": 2,
-        "force_tiled": None, "dtype": "float16",
-        "compile": False, "ttg_start": 0,
+        "frames": 5,
+        "steps": 2,
+        "force_tiled": None,
+        "dtype": "float16",
+        "compile": False,
+        "ttg_start": 0,
     },
     {
         "name": "native-480x270-2f-fp32",
         "resolution": None,
-        "frames": 2, "steps": 2,
-        "force_tiled": None, "dtype": "float32",
-        "compile": False, "ttg_start": 0,
+        "frames": 2,
+        "steps": 2,
+        "force_tiled": None,
+        "dtype": "float32",
+        "compile": False,
+        "ttg_start": 0,
     },
 ]
 
@@ -188,7 +218,8 @@ def run_scenario(scenario: dict, raft_model, output_dir: Path) -> dict:
     mx.reset_peak_memory()
     t_start = time.time()
     try:
-        output_frames = pipe(**call_kwargs)
+        pipeline_result = pipe(**call_kwargs)
+        output_frames = pipeline_result.frames
         t_total = time.time() - t_start
         result["status"] = "success"
         result["total_time_s"] = round(t_total, 2)
@@ -241,22 +272,24 @@ def generate_markdown(results: list[dict]) -> str:
             f"{r['status']} |"
         )
 
-    lines.extend([
-        "",
-        "## Configuration",
-        "",
-        f"- Model: `{MODEL_PATH}`",
-        f"- Frames source: `{FRAME_DIR}`",
-        "- Guidance scale: 7.5",
-        "- Seed: 42",
-        "",
-        "## Notes",
-        "",
-        "- **auto** tiling: activates when latent area > 4096 pixels (64×64)",
-        "- **forced** tiling: tile_size=64, tile_overlap=16 (defaults)",
-        "- OOM scenarios will show as `error` status with memory at time of failure",
-        "- Load time includes model weight loading and dtype conversion",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Configuration",
+            "",
+            f"- Model: `{MODEL_PATH}`",
+            f"- Frames source: `{FRAME_DIR}`",
+            "- Guidance scale: 7.5",
+            "- Seed: 42",
+            "",
+            "## Notes",
+            "",
+            "- **auto** tiling: activates when latent area > 4096 pixels (64×64)",
+            "- **forced** tiling: tile_size=64, tile_overlap=16 (defaults)",
+            "- OOM scenarios will show as `error` status with memory at time of failure",
+            "- Load time includes model weight loading and dtype conversion",
+        ]
+    )
     return "\n".join(lines)
 
 

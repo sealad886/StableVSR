@@ -19,7 +19,7 @@ StableVSR enhances perceptual quality in video super-resolution using diffusion 
 | `torch-cuda` | Full inference + training | Linux/Windows with NVIDIA GPU |
 | `torch-mps` | Full inference | Apple Silicon Mac (arm64) |
 | `torch-cpu` | Full inference (slow) | Any platform |
-| `mlx` | Scaffold only | Apple Silicon (blocked: no ControlNet/RAFT in MLX) |
+| `mlx` | Full inference | Apple Silicon Mac (native, optimized) |
 
 The runtime auto-detects the best backend. Override with `--backend` or `STABLEVSR_BACKEND`.
 
@@ -68,6 +68,25 @@ Models are downloaded automatically from [HuggingFace](https://huggingface.co/cl
 
 Input must be a directory of image sequences (PNG, JPG, BMP, TIFF, or WebP). Subdirectories are treated as separate sequences. See [docs/inference.md](docs/inference.md) for full CLI reference.
 
+### MLX inference (Apple Silicon native)
+
+```bash
+# With preset (recommended)
+stablevsr mlx-infer --input ./lr_frames --output ./sr_output --preset safe
+
+# Long video with chunked inference
+stablevsr mlx-infer --input ./lr_frames --output ./sr_output --preset safe --steps 50
+
+# Maximum speed
+stablevsr mlx-infer --input ./lr_frames --output ./sr_output --preset fast
+
+# Custom settings
+stablevsr mlx-infer --input ./lr_frames --output ./sr_output \
+    --compile --ttg-start-step 10 --chunk-size 16 --chunk-overlap 4
+```
+
+Presets: `max-quality`, `safe` (recommended), `balanced`, `fast`. See [docs/quality_tradeoffs.md](docs/quality_tradeoffs.md) for details.
+
 ### Smoke test (no model download)
 
 ```bash
@@ -104,7 +123,7 @@ Evaluation on REDS (320×180 → 1280×720) requires ~14.5 GB.
 - **Primary backend**: `torch-mps` — full inference, automatic selection on Apple Silicon
 - **Supported dtypes**: `float32`, `float16` (no `bfloat16` on MPS)
 - **Memory tips**: Use `--vae-tiling` and `--cpu-offload` for large resolutions
-- **MLX status**: Scaffold only — ControlNet, RAFT optical flow, and bidirectional sampling have no MLX equivalents
+- **MLX backend**: Full native inference with `stablevsr mlx-infer` — supports presets, chunked long-video processing, and `mx.compile` acceleration
 
 See [docs/apple_silicon.md](docs/apple_silicon.md) for the full Apple Silicon guide.
 
@@ -117,6 +136,7 @@ See [docs/apple_silicon.md](docs/apple_silicon.md) for the full Apple Silicon gu
 | [docs/backends.md](docs/backends.md) | Backend architecture, capability matrix, extending |
 | [docs/apple_silicon.md](docs/apple_silicon.md) | Apple Silicon guide, MPS limitations, MLX status |
 | [docs/development.md](docs/development.md) | Dev setup, testing, project structure |
+| [docs/quality_tradeoffs.md](docs/quality_tradeoffs.md) | Optimization presets, quality/speed/memory tradeoffs |
 | [docs/modernization_audit.md](docs/modernization_audit.md) | Modernization audit and phased plan |
 
 ## Development

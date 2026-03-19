@@ -10,6 +10,7 @@ import gc
 import json
 import logging
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -22,11 +23,21 @@ from .flow.raft_bridge import compute_flows_via_raft
 from .models.controlnet import ControlNetModel
 from .models.text_encoder import CLIPTextModel
 from .models.unet import UNet2DConditionModel
-from .models.vae import AutoencoderKL, DEFAULT_TILE_OVERLAP, DEFAULT_TILE_SIZE
+from .models.vae import DEFAULT_TILE_OVERLAP, DEFAULT_TILE_SIZE, AutoencoderKL
 from .scheduler import MLXDDPMScheduler
 from .weight_utils import load_safetensors_for_mlx
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PipelineResult:
+    """Result from a pipeline call, including frames and timing metadata."""
+
+    frames: list[np.ndarray]
+    stage_timing: dict[str, float]
+    num_frames: int
+    num_steps: int
 
 
 class MLXStableVSRPipeline:
@@ -321,7 +332,7 @@ class MLXStableVSRPipeline:
                 passes for fused GPU kernel execution (~30-50% speedup).
 
         Returns:
-            List of SR frames as (H, W, 3) uint8 numpy arrays.
+            PipelineResult with SR frames and stage timing.
         """
         import torch
 
@@ -392,9 +403,7 @@ class MLXStableVSRPipeline:
         # 7. Denoising loop with bidirectional temporal sampling
         logger.info(f"Denoising: {len(timesteps)} steps x {n_frames} frames...")
         if ttg_start_step > 0:
-            logger.info(
-                f"Temporal texture guidance starts at step {ttg_start_step}"
-            )
+            logger.info(f"Temporal texture guidance starts at step {ttg_start_step}")
         reversed_order = False
         total_ops = len(timesteps) * n_frames
         op_count = 0
@@ -413,7 +422,9 @@ class MLXStableVSRPipeline:
                 down_res_list = list(residuals[:-1])
                 mid_res = residuals[-1]
                 return self.unet(
-                    sample, timestep, enc,
+                    sample,
+                    timestep,
+                    enc,
                     down_block_additional_residuals=down_res_list,
                     mid_block_additional_residual=mid_res,
                 )
@@ -421,7 +432,9 @@ class MLXStableVSRPipeline:
             @mx.compile
             def _compiled_controlnet(sample, timestep, enc, cond, scale):
                 return self.controlnet(
-                    sample, timestep, enc,
+                    sample,
+                    timestep,
+                    enc,
                     controlnet_cond=cond,
                     conditioning_scale=scale,
                 )
@@ -442,9 +455,7 @@ class MLXStableVSRPipeline:
 
                 # Temporal Texture Guidance (for non-first frames, after ttg_start_step)
                 use_ttg = (
-                    frame_idx != 0
-                    and x0_est is not None
-                    and step_idx >= ttg_start_step
+                    frame_idx != 0 and x0_est is not None and step_idx >= ttg_start_step
                 )
                 if use_ttg:
                     # Decode x0_est to pixel space (tiled to avoid OOM)
@@ -579,6 +590,14 @@ class MLXStableVSRPipeline:
         if reversed_order:
             latents.reverse()
 
+        stage_timing = {
+            "vae_decode": round(_t_vae_decode, 3),
+            "flow_warp": round(_t_flow_warp, 3),
+            "controlnet": round(_t_controlnet, 3),
+            "unet": round(_t_unet, 3),
+            "scheduler": round(_t_scheduler, 3),
+        }
+
         logger.info(
             "Denoising stage timing: "
             f"vae_decode={_t_vae_decode:.1f}s, "
@@ -605,7 +624,12 @@ class MLXStableVSRPipeline:
             img = ((img + 1.0) / 2.0 * 255.0).clip(0, 255).astype(np.uint8)
             output_frames.append(img)
 
-        return output_frames
+        return PipelineResult(
+            frames=output_frames,
+            stage_timing=stage_timing,
+            num_frames=n_frames,
+            num_steps=num_inference_steps,
+        )
 
 
 def _load_weights_into_model(

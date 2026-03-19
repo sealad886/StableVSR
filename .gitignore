@@ -7,3 +7,14 @@
 e2e_test/
 
 models/
+
+# Codanna index and fastembed cache
+.codanna/
+.fastembed_cache/
+
+# Virtual environments
+.venv*
+
+# Build artifacts
+dist/
+*.egg-info

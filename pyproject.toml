@@ -79,6 +79,9 @@ stablevsr = "stablevsr.cli:main"
 Homepage = "https://github.com/claudiom4sir/StableVSR"
 Paper = "https://arxiv.org/abs/2311.15908"
 
+[tool.hatch.build]
+exclude = [".venv*", "models/", "e2e_test/", ".dolt/", ".beads/", ".codanna/", ".fastembed_cache/"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/stablevsr"]
 

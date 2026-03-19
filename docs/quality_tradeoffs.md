@@ -37,14 +37,17 @@ different point on the quality–speed–memory curve.
 - `compile_models=True`, `ttg_start_step=25%`, `chunk_size=12`, `chunk_overlap=3`
 - Skips temporal guidance on the first 25% of denoising steps
 - Smaller chunks = lower peak memory, faster per-chunk
-- Expected quality reduction in temporal consistency (not yet empirically quantified)
+- Measured: 53.33 dB PSNR vs max-quality reference (excellent), 1.26× speedup
+- Temporal stability: 0.281 (slightly better than max-quality at 0.291)
 
 #### `fast`
 
 - `compile_models=True`, `ttg_start_step=50%`, `chunk_size=8`, `chunk_overlap=2`
 - Skips temporal guidance on the first 50% of denoising steps
 - Aggressive chunking with smaller overlap
-- Expected quality reduction; use `scripts/quality_compare.py` to evaluate on your content
+- Measured: 43.70 dB PSNR vs max-quality reference (very good), 2.39× speedup
+- Temporal stability: 0.304 (slightly higher than max-quality at 0.291)
+- Use `scripts/quality_compare.py` to evaluate on your specific content
 
 ## Optimization Mechanisms
 
@@ -63,9 +66,9 @@ each frame is denoised independently for those steps.
 
 **Quality impact:** Higher values reduce temporal consistency.
 - `ttg_start_step=0`: Full guidance on every step (default, best quality)
-- `ttg_start_step=steps//4`: Mild degradation, often imperceptible
-- `ttg_start_step=steps//2`: Noticeable on scenes with subtle motion
-- `ttg_start_step=steps`: Temporal guidance entirely disabled
+- `ttg_start_step=steps//4`: 53.33 dB PSNR vs reference — near-imperceptible degradation
+- `ttg_start_step=steps//2`: 43.70 dB PSNR vs reference — excellent quality, 2.39× speedup
+- `ttg_start_step=steps`: Temporal guidance entirely disabled (not recommended)
 
 ### Temporal Chunking
 
@@ -143,3 +146,18 @@ This reports:
 | Batch processing | `balanced` | Faster turnaround |
 | Quick preview | `fast` | Rapid iteration |
 | Custom | CLI flags | Fine-tune individual parameters |
+
+## Measured Performance (480×270 → 1920×1080, 10 steps)
+
+Benchmarked on Apple Silicon with MLX 0.31.1 using `scripts/quality_compare.py`.
+See [quality_results.md](quality_results.md) for full analysis.
+
+| Preset | s/frame | Speedup | PSNR (dB) | Stability |
+|---|---|---|---|---|
+| max-quality | 330.4 | 1.0× | ∞ (ref) | 0.291 |
+| safe | 281.9 | 1.17× | 77.54 | 0.291 |
+| balanced | 262.9 | 1.26× | 53.33 | 0.281 |
+| fast | 138.1 | 2.39× | 43.70 | 0.304 |
+
+All presets produce PSNR >40 dB vs the max-quality reference, meaning quality
+differences are imperceptible or near-imperceptible for practical use.

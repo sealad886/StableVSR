@@ -38,16 +38,16 @@ class TestMLXBackend:
         backend = MLXBackend()
         assert backend.name() == "mlx"
 
-    def test_capabilities_reports_no_inference(self):
+    def test_capabilities_reports_inference(self):
         backend = MLXBackend()
         caps = backend.capabilities()
-        assert caps.inference is False
+        assert caps.inference is True
         assert caps.training is False
 
-    def test_notes_mention_scaffold(self):
+    def test_notes_mention_raft_bridge(self):
         backend = MLXBackend()
         caps = backend.capabilities()
-        assert any("scaffold" in note for note in caps.notes)
+        assert any("RAFT" in note for note in caps.notes)
 
 
 class TestRegistry:

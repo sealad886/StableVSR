@@ -28,7 +28,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 - MLX pipeline `__call__` now returns `PipelineResult` instead of
   `list[np.ndarray]` — callers updated accordingly
-- README updated to reflect full MLX backend support
+- README updated to reflect MLX backend support with honest RAFT dependency note
+
+### Fixed
+
+- `pipeline.py` return type annotation corrected from `list[np.ndarray]` to
+  `PipelineResult`
+- `mlx_backend.py` now reports `inference=True` (was stale `False` from scaffold era)
+  with notes documenting the RAFT PyTorch-CPU bridge dependency
+- Memory estimate in `presets.py` corrected: latent uses `out_h // 4` (vae_scale_factor=4)
+  instead of incorrect `out_h // 8` which under-counted latent memory by 4×
+- Documentation truthfulness: README backend table relabeled from "Full inference"
+  to "Inference (RAFT via torch)"; docs/quality_tradeoffs.md memory formula fixed;
+  preset quality claims softened to avoid unverified assertions
 
 ## [0.1.0] — 2025-01-26
 

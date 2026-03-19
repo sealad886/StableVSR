@@ -699,35 +699,48 @@ def build_parser() -> argparse.ArgumentParser:
     )
     mlx_p.add_argument("--seed", type=int, default=42, help="Random seed (default: 42)")
     mlx_p.add_argument(
-        "--compile", action="store_true", default=None,
+        "--compile",
+        action="store_true",
+        default=None,
         help="Enable mx.compile for UNet/ControlNet",
     )
     mlx_p.add_argument(
-        "--no-compile", action="store_true",
+        "--no-compile",
+        action="store_true",
         help="Disable mx.compile",
     )
     mlx_p.add_argument(
-        "--ttg-start-step", type=int, default=None,
+        "--ttg-start-step",
+        type=int,
+        default=None,
         help="Step at which temporal texture guidance begins",
     )
     mlx_p.add_argument(
-        "--chunk-size", type=int, default=None,
+        "--chunk-size",
+        type=int,
+        default=None,
         help="Frames per temporal chunk (enables chunked inference)",
     )
     mlx_p.add_argument(
-        "--chunk-overlap", type=int, default=None,
+        "--chunk-overlap",
+        type=int,
+        default=None,
         help="Overlapping frames between adjacent chunks",
     )
     mlx_p.add_argument(
-        "--resume", action="store_true",
+        "--resume",
+        action="store_true",
         help="Resume from a previous incomplete chunked run",
     )
     mlx_p.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="Plan chunks and print summary without running inference",
     )
     mlx_p.add_argument(
-        "--force-tiled-vae", action="store_true", default=None,
+        "--force-tiled-vae",
+        action="store_true",
+        default=None,
         help="Force tiled VAE decode",
     )
     mlx_p.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
@@ -762,7 +775,8 @@ def cmd_mlx_infer(args: argparse.Namespace) -> None:
 
     # Load frames
     frame_paths = sorted(
-        p for p in input_dir.iterdir()
+        p
+        for p in input_dir.iterdir()
         if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".bmp", ".tiff")
     )
     if not frame_paths:
@@ -787,7 +801,9 @@ def cmd_mlx_infer(args: argparse.Namespace) -> None:
         ttg_start_step = preset.resolve_ttg_start_step(args.steps)
         chunk_size = preset.chunk_size
         chunk_overlap = preset.chunk_overlap
-        force_tiled_vae = preset.force_tiled_vae if force_tiled_vae is None else force_tiled_vae
+        force_tiled_vae = (
+            preset.force_tiled_vae if force_tiled_vae is None else force_tiled_vae
+        )
 
     # Explicit flags override preset
     if args.compile is True:
@@ -815,7 +831,9 @@ def cmd_mlx_infer(args: argparse.Namespace) -> None:
     )
     has_errors = log_guardrails(warnings)
     if has_errors:
-        log.error("Guardrail errors detected — aborting. Use explicit flags to override.")
+        log.error(
+            "Guardrail errors detected — aborting. Use explicit flags to override."
+        )
         sys.exit(1)
 
     # Load pipeline + RAFT
@@ -833,6 +851,7 @@ def cmd_mlx_infer(args: argparse.Namespace) -> None:
 
     log.info("Loading RAFT optical flow model...")
     from stablevsr.mlx.flow.raft_bridge import load_raft_model
+
     raft_model = load_raft_model()
 
     # Build common kwargs
@@ -893,7 +912,10 @@ def cmd_mlx_infer(args: argparse.Namespace) -> None:
 
     log.info(
         "Done: %d frames in %.1fs (%.1f s/frame), saved to %s",
-        len(sr_frames), elapsed, elapsed / len(sr_frames), output_dir,
+        len(sr_frames),
+        elapsed,
+        elapsed / len(sr_frames),
+        output_dir,
     )
 
 

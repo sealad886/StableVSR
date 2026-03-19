@@ -43,9 +43,9 @@ def temporal_stability(frames: list[np.ndarray]) -> float:
         return 0.0
     diffs = []
     for i in range(1, len(frames)):
-        diff = np.mean(np.abs(
-            frames[i].astype(np.float32) - frames[i - 1].astype(np.float32)
-        ))
+        diff = np.mean(
+            np.abs(frames[i].astype(np.float32) - frames[i - 1].astype(np.float32))
+        )
         diffs.append(diff)
     return float(np.std(diffs))
 
@@ -112,8 +112,7 @@ def compare(args: argparse.Namespace) -> None:
     # Load frames
     input_dir = Path(args.input)
     frame_paths = sorted(
-        p for p in input_dir.iterdir()
-        if p.suffix.lower() in (".png", ".jpg", ".jpeg")
+        p for p in input_dir.iterdir() if p.suffix.lower() in (".png", ".jpg", ".jpeg")
     )
     if not frame_paths:
         logger.error("No frames in %s", input_dir)
@@ -148,11 +147,16 @@ def compare(args: argparse.Namespace) -> None:
         logger.info("\n=== Preset: %s ===", preset_name)
         logger.info(
             "  compile=%s, ttg_start=%d, chunk=%s, overlap=%d",
-            preset.compile_models, ttg, preset.chunk_size, preset.chunk_overlap,
+            preset.compile_models,
+            ttg,
+            preset.chunk_size,
+            preset.chunk_overlap,
         )
 
         frames, elapsed, timing = run_config(
-            pipe, raft_model, images,
+            pipe,
+            raft_model,
+            images,
             steps=args.steps,
             seed=args.seed,
             compile_models=preset.compile_models,
@@ -180,15 +184,16 @@ def compare(args: argparse.Namespace) -> None:
             "stage_timing": timing,
         }
         results.append(entry)
-        logger.info("  Time: %.1fs (%.1f s/frame)", elapsed, elapsed / max(len(frames), 1))
+        logger.info(
+            "  Time: %.1fs (%.1f s/frame)", elapsed, elapsed / max(len(frames), 1)
+        )
 
     # Compute PSNR vs max-quality reference
     ref_name = "max-quality"
     ref_dir = output_dir / ref_name
     if ref_dir.exists():
         ref_frames = [
-            np.array(Image.open(p))
-            for p in sorted(ref_dir.glob("frame_*.png"))
+            np.array(Image.open(p)) for p in sorted(ref_dir.glob("frame_*.png"))
         ]
         for entry in results:
             if entry["preset"] == ref_name:
@@ -196,8 +201,7 @@ def compare(args: argparse.Namespace) -> None:
                 continue
             preset_dir = output_dir / entry["preset"]
             test_frames = [
-                np.array(Image.open(p))
-                for p in sorted(preset_dir.glob("frame_*.png"))
+                np.array(Image.open(p)) for p in sorted(preset_dir.glob("frame_*.png"))
             ]
             if len(test_frames) == len(ref_frames):
                 psnrs = [psnr(r, t) for r, t in zip(ref_frames, test_frames)]

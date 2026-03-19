@@ -101,18 +101,46 @@ class TestGuardrails:
         assert any(w.code == "COMPILE_ONE_STEP" for w in warnings)
 
     def test_no_tiling_large_warns(self):
-        warnings = check_guardrails(**self._base_kwargs(
-            height=540, width=960, force_tiled_vae=False,
-        ))
+        warnings = check_guardrails(
+            **self._base_kwargs(
+                height=540,
+                width=960,
+                force_tiled_vae=False,
+            )
+        )
         assert any(w.code == "NO_TILING_LARGE" for w in warnings)
 
     def test_high_memory_warns(self):
         """100 frames at 4K without chunking should trigger memory warning."""
-        warnings = check_guardrails(**self._base_kwargs(
-            num_frames=100, height=2160, width=3840,
-        ))
+        warnings = check_guardrails(
+            **self._base_kwargs(
+                num_frames=100,
+                height=2160,
+                width=3840,
+            )
+        )
         codes = [w.code for w in warnings]
         assert "MEMORY_HIGH" in codes or "LONG_VIDEO_NO_CHUNK" in codes
+
+    def test_memory_estimate_uses_correct_latent_divisor(self):
+        """Latent divisor must be 4 (vae_scale_factor=4), not 8.
+
+        For 480x270 input, output is 1920x1080.
+        Correct latent: 480x270 (out_h//4 x out_w//4), 4 ch, 2 bytes = 1,036,800 bytes.
+        Wrong (//8) would be 240x135 = 259,200 bytes (4x too small).
+        With enough frames the correct formula should trigger MEMORY_HIGH.
+        """
+        # 200 frames at 1080p-input (4320x7680 output) should easily exceed 8 GB
+        warnings = check_guardrails(
+            **self._base_kwargs(
+                num_frames=200,
+                height=1080,
+                width=1920,
+                chunk_size=None,
+            )
+        )
+        codes = [w.code for w in warnings]
+        assert "MEMORY_HIGH" in codes
 
 
 class TestLogGuardrails:

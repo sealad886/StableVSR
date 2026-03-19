@@ -37,14 +37,14 @@ different point on the quality–speed–memory curve.
 - `compile_models=True`, `ttg_start_step=25%`, `chunk_size=12`, `chunk_overlap=3`
 - Skips temporal guidance on the first 25% of denoising steps
 - Smaller chunks = lower peak memory, faster per-chunk
-- Minor quality reduction in temporal consistency
+- Expected quality reduction in temporal consistency (not yet empirically quantified)
 
 #### `fast`
 
 - `compile_models=True`, `ttg_start_step=50%`, `chunk_size=8`, `chunk_overlap=2`
 - Skips temporal guidance on the first 50% of denoising steps
 - Aggressive chunking with smaller overlap
-- Significant speed improvement; noticeable quality reduction possible
+- Expected quality reduction; use `scripts/quality_compare.py` to evaluate on your content
 
 ## Optimization Mechanisms
 
@@ -93,12 +93,12 @@ Approximate working-set memory per chunk (float16):
 
 ```
 per_frame ≈ (4×H) × (4×W) × 3 × 2 bytes  (output pixels, f16)
-           + (H/2) × (W/2) × 4 × 2 bytes  (latent, f16)
+           + (H) × (W) × 4 × 2 bytes      (latent, f16, vae_scale_factor=4)
 ```
 
 For 480×270 input (→ 1920×1080 output):
-- ~12 MB per frame in working memory
-- 16 frames ≈ ~200 MB working set
+- ~12 MB output pixels + ~4 MB latent per frame
+- 16 frames ≈ ~260 MB working set
 - Plus model weights (~5 GB)
 
 ## Guardrail System

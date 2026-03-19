@@ -19,7 +19,7 @@ StableVSR enhances perceptual quality in video super-resolution using diffusion 
 | `torch-cuda` | Full inference + training | Linux/Windows with NVIDIA GPU |
 | `torch-mps` | Full inference | Apple Silicon Mac (arm64) |
 | `torch-cpu` | Full inference (slow) | Any platform |
-| `mlx` | Full inference | Apple Silicon Mac (native, optimized) |
+| `mlx` | Inference (RAFT via torch) | Apple Silicon Mac (native, optimized) |
 
 The runtime auto-detects the best backend. Override with `--backend` or `STABLEVSR_BACKEND`.
 
@@ -123,7 +123,7 @@ Evaluation on REDS (320×180 → 1280×720) requires ~14.5 GB.
 - **Primary backend**: `torch-mps` — full inference, automatic selection on Apple Silicon
 - **Supported dtypes**: `float32`, `float16` (no `bfloat16` on MPS)
 - **Memory tips**: Use `--vae-tiling` and `--cpu-offload` for large resolutions
-- **MLX backend**: Full native inference with `stablevsr mlx-infer` — supports presets, chunked long-video processing, and `mx.compile` acceleration
+- **MLX backend**: Native inference with `stablevsr mlx-infer` — UNet/VAE/ControlNet run in MLX on Metal; RAFT optical flow uses a PyTorch-CPU bridge. Supports presets, chunked long-video processing, and `mx.compile` acceleration.
 
 See [docs/apple_silicon.md](docs/apple_silicon.md) for the full Apple Silicon guide.
 

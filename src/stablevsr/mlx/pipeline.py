@@ -306,7 +306,7 @@ class MLXStableVSRPipeline:
         tile_overlap: int = DEFAULT_TILE_OVERLAP,
         ttg_start_step: int = 0,
         compile_models: bool = False,
-    ) -> list[np.ndarray]:
+    ) -> PipelineResult:
         """Run video super-resolution.
 
         Args:

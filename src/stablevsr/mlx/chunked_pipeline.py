@@ -73,7 +73,7 @@ def plan_chunks(
         end = min(start + chunk_size, num_frames)
 
         # If this chunk already covers all remaining frames, mark no overlap_after
-        covers_end = (end == num_frames)
+        covers_end = end == num_frames
 
         # Minimum viable chunk: at least 2 frames (need >= 1 for pipeline)
         # If remainder is < 2 and we already have chunks, extend the last one
@@ -91,13 +91,15 @@ def plan_chunks(
         overlap_before = chunk_overlap if chunk_idx > 0 else 0
         overlap_after = chunk_overlap if not covers_end else 0
 
-        chunks.append(ChunkSpec(
-            chunk_index=chunk_idx,
-            start_frame=start,
-            end_frame=end,
-            overlap_before=overlap_before,
-            overlap_after=overlap_after,
-        ))
+        chunks.append(
+            ChunkSpec(
+                chunk_index=chunk_idx,
+                start_frame=start,
+                end_frame=end,
+                overlap_before=overlap_before,
+                overlap_after=overlap_after,
+            )
+        )
 
         if covers_end:
             break
@@ -134,9 +136,13 @@ def blend_overlap(
         alpha_a = 1.0 - (i + 1) / (overlap + 1)
         alpha_b = 1.0 - alpha_a
         mixed = (
-            frames_a[i].astype(np.float32) * alpha_a
-            + frames_b[i].astype(np.float32) * alpha_b
-        ).clip(0, 255).astype(np.uint8)
+            (
+                frames_a[i].astype(np.float32) * alpha_a
+                + frames_b[i].astype(np.float32) * alpha_b
+            )
+            .clip(0, 255)
+            .astype(np.uint8)
+        )
         blended.append(mixed)
 
     return blended
@@ -154,13 +160,19 @@ class ChunkManifest:
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({
-            "total_frames": self.total_frames,
-            "chunk_size": self.chunk_size,
-            "chunk_overlap": self.chunk_overlap,
-            "completed_chunks": sorted(self.completed_chunks),
-            "config_hash": self.config_hash,
-        }, indent=2) + "\n")
+        path.write_text(
+            json.dumps(
+                {
+                    "total_frames": self.total_frames,
+                    "chunk_size": self.chunk_size,
+                    "chunk_overlap": self.chunk_overlap,
+                    "completed_chunks": sorted(self.completed_chunks),
+                    "config_hash": self.config_hash,
+                },
+                indent=2,
+            )
+            + "\n"
+        )
 
     @classmethod
     def load(cls, path: Path) -> "ChunkManifest":
@@ -230,13 +242,20 @@ def run_chunked_inference(
     # Log chunk plan
     logger.info(
         "Chunk plan: %d frames → %d chunks (size=%d, overlap=%d)",
-        num_frames, len(chunks), chunk_size, chunk_overlap,
+        num_frames,
+        len(chunks),
+        chunk_size,
+        chunk_overlap,
     )
     for c in chunks:
         logger.info(
             "  Chunk %d: frames [%d, %d) (%d frames, overlap_before=%d, overlap_after=%d)",
-            c.chunk_index, c.start_frame, c.end_frame,
-            c.num_frames, c.overlap_before, c.overlap_after,
+            c.chunk_index,
+            c.start_frame,
+            c.end_frame,
+            c.num_frames,
+            c.overlap_before,
+            c.overlap_after,
         )
 
     if dry_run:
@@ -250,12 +269,12 @@ def run_chunked_inference(
         output_dir.mkdir(parents=True, exist_ok=True)
         if resume and manifest_path and manifest_path.exists():
             manifest = ChunkManifest.load(manifest_path)
-            if (manifest.total_frames != num_frames
-                    or manifest.chunk_size != chunk_size
-                    or manifest.chunk_overlap != chunk_overlap):
-                logger.warning(
-                    "Manifest parameters mismatch — ignoring resume state."
-                )
+            if (
+                manifest.total_frames != num_frames
+                or manifest.chunk_size != chunk_size
+                or manifest.chunk_overlap != chunk_overlap
+            ):
+                logger.warning("Manifest parameters mismatch — ignoring resume state.")
                 manifest = None
 
     if manifest is None and manifest_path:
@@ -273,21 +292,32 @@ def run_chunked_inference(
         # Check resume
         if manifest and manifest.is_chunk_done(c.chunk_index):
             # Load from disk if available
-            chunk_dir = output_dir / f"chunk_{c.chunk_index:04d}" if output_dir else None
+            chunk_dir = (
+                output_dir / f"chunk_{c.chunk_index:04d}" if output_dir else None
+            )
             if chunk_dir and chunk_dir.exists():
                 loaded = _load_chunk_frames(chunk_dir, c.num_frames)
                 if loaded is not None:
                     chunk_outputs[c.chunk_index] = loaded
-                    logger.info("Chunk %d: resumed from disk (%d frames)", c.chunk_index, len(loaded))
+                    logger.info(
+                        "Chunk %d: resumed from disk (%d frames)",
+                        c.chunk_index,
+                        len(loaded),
+                    )
                     continue
-            logger.warning("Chunk %d marked done but frames not found — rerunning.", c.chunk_index)
+            logger.warning(
+                "Chunk %d marked done but frames not found — rerunning.", c.chunk_index
+            )
 
         logger.info(
             "Processing chunk %d/%d (frames %d-%d)...",
-            c.chunk_index + 1, len(chunks), c.start_frame, c.end_frame - 1,
+            c.chunk_index + 1,
+            len(chunks),
+            c.start_frame,
+            c.end_frame - 1,
         )
 
-        chunk_images = images[c.start_frame:c.end_frame]
+        chunk_images = images[c.start_frame : c.end_frame]
         chunk_seed = seed + c.start_frame if seed is not None else None
 
         t0 = time.perf_counter()
@@ -310,7 +340,10 @@ def run_chunked_inference(
 
         logger.info(
             "Chunk %d done in %.1fs (%d frames, %.1f s/frame)",
-            c.chunk_index, elapsed, len(sr_frames), elapsed / max(len(sr_frames), 1),
+            c.chunk_index,
+            elapsed,
+            len(sr_frames),
+            elapsed / max(len(sr_frames), 1),
         )
 
         chunk_outputs[c.chunk_index] = sr_frames
@@ -324,7 +357,9 @@ def run_chunked_inference(
                 manifest.mark_done(c.chunk_index, manifest_path)
 
         if progress_callback:
-            progress_callback(c.chunk_index + 1, len(chunks), f"chunk {c.chunk_index} done")
+            progress_callback(
+                c.chunk_index + 1, len(chunks), f"chunk {c.chunk_index} done"
+            )
 
         # Free memory between chunks
         gc.collect()
@@ -335,7 +370,9 @@ def run_chunked_inference(
 
     logger.info(
         "Chunked inference complete: %d input frames → %d output frames in %.1fs",
-        num_frames, len(final_frames), total_time,
+        num_frames,
+        len(final_frames),
+        total_time,
     )
 
     # Save final manifest
@@ -372,7 +409,7 @@ def _assemble_chunks(
         if i == 0:
             # First chunk: take all frames except the overlap_after region
             if c.overlap_after > 0 and i + 1 < len(chunks):
-                result.extend(frames[:-c.overlap_after])
+                result.extend(frames[: -c.overlap_after])
             else:
                 result.extend(frames)
         else:
@@ -388,13 +425,13 @@ def _assemble_chunks(
                 # Add remaining non-overlap frames
                 remaining = frames[chunk_overlap:]
                 if c.overlap_after > 0 and i + 1 < len(chunks):
-                    result.extend(remaining[:-c.overlap_after])
+                    result.extend(remaining[: -c.overlap_after])
                 else:
                     result.extend(remaining)
             else:
                 # No overlap to blend
                 if c.overlap_after > 0 and i + 1 < len(chunks):
-                    result.extend(frames[:-c.overlap_after])
+                    result.extend(frames[: -c.overlap_after])
                 else:
                     result.extend(frames)
 

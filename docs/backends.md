@@ -10,7 +10,7 @@ compute-device logic from the inference and training pipeline.
 | `torch-cuda`  | if CUDA present | yes       | yes      | yes            | float16       | Full support                               |
 | `torch-mps`   | if MPS present  | yes       | no       | yes            | float16       | Training not tested; some ops fall to CPU   |
 | `torch-cpu`   | always          | yes       | no*      | no             | float32       | Slow but always works                      |
-| `mlx`         | if mlx installed| **yes**   | no       | yes            | float16       | Primary Apple Silicon backend              |
+| `mlx`         | if mlx installed| **yes**   | no       | yes            | float16       | Apple Silicon; RAFT via torch bridge       |
 
 \* CPU training is technically possible but omitted from capabilities because it is impractically slow.
 
@@ -22,7 +22,8 @@ Backend resolution follows a strict priority chain:
 2. **Environment variable** — `STABLEVSR_BACKEND`
 3. **Auto-detect** — MLX (if available **and** inference-capable) → Torch (CUDA > MPS > CPU)
 
-MLX currently reports `inference=False`, so auto-detect always falls through to Torch.
+MLX currently reports `inference=True` when the mlx package is installed, so auto-detect
+picks MLX first on Apple Silicon if torch is also available (for RAFT).
 
 ```
 ┌──────────────────────┐
@@ -62,12 +63,12 @@ Example output on Apple Silicon:
 
 [mlx] AVAILABLE
   Device:         gpu
-  Inference:      no
+  Inference:      yes
   Training:       no
   Half precision: yes
-  Note: MLX backend is a scaffold — inference not yet implemented
-  Note: StableVSR requires custom ControlNet + RAFT which have no MLX equivalents
-  Note: Use torch-mps for Apple Silicon inference today
+  Note: Native MLX inference on Apple Silicon (Metal GPU)
+  Note: RAFT optical flow uses a PyTorch-CPU bridge (torch required at runtime)
+  Note: Use 'stablevsr mlx-infer' or the MLXStableVSRPipeline API directly
 ```
 
 ## Forcing a Backend

@@ -1,4 +1,4 @@
-"""MLX backend scaffold — honest about current capabilities."""
+"""MLX backend for Apple Silicon inference."""
 
 from __future__ import annotations
 
@@ -16,10 +16,9 @@ except ModuleNotFoundError:
 class MLXBackend(Backend):
     """MLX backend for Apple Silicon.
 
-    Currently a scaffold — the full StableVSR pipeline (custom ControlNet +
-    RAFT optical flow + bidirectional sampling) cannot run on MLX yet.
-    This backend reports honest capabilities and will gain features as
-    MLX ecosystem support matures.
+    UNet, VAE, ControlNet, text encoder, and scheduler all run natively
+    in MLX on Metal.  RAFT optical flow uses a PyTorch-CPU bridge
+    (the only remaining torch runtime dependency in the MLX path).
     """
 
     def name(self) -> str:
@@ -31,18 +30,18 @@ class MLXBackend(Backend):
         return _MLX_AVAILABLE
 
     def capabilities(self) -> BackendCapabilities:
-        """Return scaffold capabilities — inference is not yet supported."""
+        """Return MLX backend capabilities."""
         return BackendCapabilities(
             name="mlx",
             available=_MLX_AVAILABLE,
-            inference=False,
+            inference=_MLX_AVAILABLE,
             training=False,
             half_precision=_MLX_AVAILABLE,
             device_name="gpu" if _MLX_AVAILABLE else "",
             notes=[
-                "MLX backend is a scaffold — inference not yet implemented",
-                "StableVSR requires custom ControlNet + RAFT which have no MLX equivalents",
-                "Use torch-mps for Apple Silicon inference today",
+                "Native MLX inference on Apple Silicon (Metal GPU)",
+                "RAFT optical flow uses a PyTorch-CPU bridge (torch required at runtime)",
+                "Use 'stablevsr mlx-infer' or the MLXStableVSRPipeline API directly",
             ],
         )
 

@@ -24,8 +24,9 @@ stablevsr infer --input ./frames --output ./sr --fp16 --vae-tiling
 ### MLX (Primary)
 
 The MLX backend provides native Apple Silicon inference with full Metal GPU
-acceleration. All StableVSR components (UNet, VAE, ControlNet, scheduler) run
-natively in MLX. Optical flow (RAFT) uses a minimal PyTorch bridge.
+acceleration. All StableVSR components (UNet, VAE, ControlNet, text encoder,
+scheduler) run natively in MLX. Optical flow (RAFT) uses a PyTorch-CPU bridge,
+so **torch is required at runtime** even when using the MLX backend.
 
 | Capability | Status |
 |---|---|

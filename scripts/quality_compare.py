@@ -1,7 +1,7 @@
 """Compare quality across preset configurations.
 
 Runs the MLX pipeline with each preset on the same input and reports:
-- Per-frame PSNR and SSIM (against max-quality reference)
+- Per-frame PSNR (against max-quality reference)
 - Per-configuration runtime
 - Temporal consistency metric (inter-frame difference stability)
 
@@ -9,7 +9,7 @@ Usage:
     python scripts/quality_compare.py --input e2e_test/input/frontdoor_clip \\
         --output e2e_test/output/quality_compare --steps 10
 
-Requires: scikit-image (for SSIM), numpy, PIL
+Requires: numpy, PIL
 """
 
 from __future__ import annotations

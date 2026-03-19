@@ -377,8 +377,10 @@ class MLXStableVSRPipeline:
 
         # 4. Compute optical flows via RAFT bridge
         logger.info("Computing optical flows via RAFT...")
+        raft_device = next(of_model.parameters()).device
         forward_flows, backward_flows = compute_flows_via_raft(
-            of_model, upscaled_torch, rescale_factor=of_rescale_factor, device="cpu"
+            of_model, upscaled_torch, rescale_factor=of_rescale_factor,
+            device=str(raft_device),
         )
         # Free torch tensors
         del images_torch, upscaled_torch

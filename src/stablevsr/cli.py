@@ -135,7 +135,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     try:
         import mlx.core  # noqa: F401
 
-        print("[OK] MLX available (scaffold only — use torch-mps for inference)")
+        print("[OK] MLX available (use 'stablevsr mlx-infer' for native inference)")
     except ImportError:
         print("[INFO] MLX not installed (optional)")
 

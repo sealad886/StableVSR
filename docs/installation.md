@@ -46,10 +46,12 @@ pip install -e ".[train]"
 pip install -e ".[eval]"
 ```
 
-### MLX (experimental scaffold)
+### MLX (Apple Silicon native inference)
 ```bash
 pip install -e ".[mlx]"
 ```
+
+Requires macOS with Apple Silicon. RAFT optical flow still requires PyTorch at runtime.
 
 ## Backend Selection
 
@@ -57,7 +59,7 @@ StableVSR auto-detects the best available backend:
 
 | Platform | Default Backend | Notes |
 |---|---|---|
-| Apple Silicon Mac | `torch-mps` | Full inference support |
+| Apple Silicon Mac | `torch-mps` | Full inference support; or use `mlx-infer` for native MLX |
 | NVIDIA GPU | `torch-cuda` | Full inference + training |
 | CPU only | `torch-cpu` | Slow but always works |
 

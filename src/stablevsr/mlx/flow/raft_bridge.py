@@ -1,4 +1,4 @@
-"""RAFT bridge: run PyTorch RAFT on CPU, convert flows to MLX arrays."""
+"""RAFT bridge: run PyTorch RAFT, convert flows to MLX arrays."""
 
 from __future__ import annotations
 
@@ -11,6 +11,24 @@ import torch.nn.functional as F
 
 if TYPE_CHECKING:
     pass
+
+
+def load_raft_model(device: str | None = None) -> torch.nn.Module:
+    """Load RAFT-Large for optical flow computation.
+
+    Returns a frozen, eval-mode RAFT model.  When *device* is ``None``
+    (the default), MPS is used when available, otherwise CPU.
+    """
+    from torchvision.models.optical_flow import Raft_Large_Weights, raft_large
+
+    if device is None:
+        device = "mps" if torch.backends.mps.is_available() else "cpu"
+
+    model = raft_large(weights=Raft_Large_Weights.DEFAULT)
+    model.requires_grad_(False)
+    model = model.to(device, dtype=torch.float32)
+    model.eval()
+    return model
 
 
 def compute_flows_via_raft(

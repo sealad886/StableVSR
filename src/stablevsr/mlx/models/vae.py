@@ -6,6 +6,7 @@ Config: latent_channels=4, block_out_channels=[128,256,512],
 
 from __future__ import annotations
 
+import logging
 import math
 
 import mlx.core as mx
@@ -14,6 +15,22 @@ import mlx.nn as nn
 
 from ..nn.resnet import ResnetBlock2D
 from ..nn.sampling import Downsample2D, Upsample2D
+
+logger = logging.getLogger(__name__)
+
+# Latent spatial area above which tiled decode is auto-enabled.
+# 64×64 = 4096 tokens is safe; 96×96 = 9216 starts becoming expensive.
+# Default threshold: 4096 latent pixels (e.g., 64×64 or 80×52).
+TILED_DECODE_LATENT_AREA_THRESHOLD = 4096
+
+# Default tile parameters (in latent-space pixels)
+DEFAULT_TILE_SIZE = 64
+DEFAULT_TILE_OVERLAP = 16
+TILED_DECODE_LATENT_AREA_THRESHOLD = 4096
+
+# Default tile parameters (in latent-space pixels)
+DEFAULT_TILE_SIZE = 64
+DEFAULT_TILE_OVERLAP = 16
 
 
 class AttentionBlock(nn.Module):
@@ -97,17 +114,28 @@ class VAEEncoder(nn.Module):
         ch_in = block_out_channels[0]
         for i, ch_out in enumerate(block_out_channels):
             resnets = [
-                ResnetBlock2D(ch_in if j == 0 else ch_out, ch_out, temb_channels=0, groups=norm_num_groups)
+                ResnetBlock2D(
+                    ch_in if j == 0 else ch_out,
+                    ch_out,
+                    temb_channels=0,
+                    groups=norm_num_groups,
+                )
                 for j in range(layers_per_block)
             ]
-            downsample = Downsample2D(ch_out) if i < len(block_out_channels) - 1 else None
-            self.down_blocks.append({"resnets": resnets, "downsamplers": [downsample] if downsample else []})
+            downsample = (
+                Downsample2D(ch_out) if i < len(block_out_channels) - 1 else None
+            )
+            self.down_blocks.append(
+                {"resnets": resnets, "downsamplers": [downsample] if downsample else []}
+            )
             ch_in = ch_out
 
         # Mid block
         self.mid_block = VAEMidBlock(ch_in, norm_num_groups)
 
-        self.conv_norm_out = nn.GroupNorm(norm_num_groups, ch_in, pytorch_compatible=True)
+        self.conv_norm_out = nn.GroupNorm(
+            norm_num_groups, ch_in, pytorch_compatible=True
+        )
         self.conv_out = nn.Conv2d(ch_in, 2 * latent_channels, 3, padding=1)
 
     def __call__(self, x: mx.array) -> mx.array:
@@ -150,14 +178,23 @@ class VAEDecoder(nn.Module):
         self.up_blocks = []
         for i, ch_out in enumerate(reversed_channels):
             resnets = [
-                ResnetBlock2D(ch_in if j == 0 else ch_out, ch_out, temb_channels=0, groups=norm_num_groups)
+                ResnetBlock2D(
+                    ch_in if j == 0 else ch_out,
+                    ch_out,
+                    temb_channels=0,
+                    groups=norm_num_groups,
+                )
                 for j in range(layers_per_block + 1)
             ]
             upsample = Upsample2D(ch_out) if i < len(reversed_channels) - 1 else None
-            self.up_blocks.append({"resnets": resnets, "upsamplers": [upsample] if upsample else []})
+            self.up_blocks.append(
+                {"resnets": resnets, "upsamplers": [upsample] if upsample else []}
+            )
             ch_in = ch_out
 
-        self.conv_norm_out = nn.GroupNorm(norm_num_groups, reversed_channels[-1], pytorch_compatible=True)
+        self.conv_norm_out = nn.GroupNorm(
+            norm_num_groups, reversed_channels[-1], pytorch_compatible=True
+        )
         self.conv_out = nn.Conv2d(reversed_channels[-1], out_channels, 3, padding=1)
 
     def __call__(self, z: mx.array) -> mx.array:
@@ -197,10 +234,18 @@ class AutoencoderKL(nn.Module):
         super().__init__()
         self.scaling_factor = scaling_factor
         self.encoder = VAEEncoder(
-            in_channels, block_out_channels, layers_per_block, latent_channels, norm_num_groups
+            in_channels,
+            block_out_channels,
+            layers_per_block,
+            latent_channels,
+            norm_num_groups,
         )
         self.decoder = VAEDecoder(
-            out_channels, block_out_channels, layers_per_block, latent_channels, norm_num_groups
+            out_channels,
+            block_out_channels,
+            layers_per_block,
+            latent_channels,
+            norm_num_groups,
         )
         self.quant_conv = nn.Conv2d(2 * latent_channels, 2 * latent_channels, 1)
         self.post_quant_conv = nn.Conv2d(latent_channels, latent_channels, 1)
@@ -217,18 +262,68 @@ class AutoencoderKL(nn.Module):
         z = self.post_quant_conv(z)
         return self.decoder(z)
 
+    def should_tile(self, z: mx.array) -> bool:
+        """Whether tiled decode should auto-activate for this latent."""
+        latent_area = z.shape[1] * z.shape[2]
+        return latent_area > TILED_DECODE_LATENT_AREA_THRESHOLD
+
+    def smart_decode(
+        self,
+        z: mx.array,
+        *,
+        force_tiled: bool | None = None,
+        tile_size: int = DEFAULT_TILE_SIZE,
+        tile_overlap: int = DEFAULT_TILE_OVERLAP,
+    ) -> mx.array:
+        """Decode with automatic tiling decision.
+
+        Args:
+            z: Latent tensor (B, H, W, C).
+            force_tiled: True → always tile; False → never tile; None → auto.
+            tile_size: Tile size in latent pixels.
+            tile_overlap: Overlap in latent pixels.
+        """
+        use_tiled = force_tiled if force_tiled is not None else self.should_tile(z)
+        if use_tiled:
+            latent_area = z.shape[1] * z.shape[2]
+            logger.info(
+                "Tiled VAE decode: latent=%dx%d (%d px), tile_size=%d, overlap=%d",
+                z.shape[1],
+                z.shape[2],
+                latent_area,
+                tile_size,
+                tile_overlap,
+            )
+            return self.tiled_decode(z, tile_size=tile_size, tile_overlap=tile_overlap)
+        logger.debug(
+            "Non-tiled VAE decode: latent=%dx%d (%d px)",
+            z.shape[1],
+            z.shape[2],
+            z.shape[1] * z.shape[2],
+        )
+        return self.decode(z)
+
     def tiled_decode(
         self,
         z: mx.array,
-        tile_size: int = 64,
-        tile_overlap: int = 16,
+        tile_size: int = DEFAULT_TILE_SIZE,
+        tile_overlap: int = DEFAULT_TILE_OVERLAP,
     ) -> mx.array:
         """Decode latent in tiles to avoid OOM from VAE mid-block attention.
 
         For this VAE with block_out_channels=[128,256,512] (vae_scale_factor=4),
         the bottleneck attention operates at full latent spatial resolution. Tiling
         keeps each attention to tile_size² tokens instead of (H*W)² tokens.
+
+        Failure mode / quality risk: linear blending across tile boundaries can
+        produce subtle seam artifacts, especially if the VAE decoder is sensitive
+        to receptive field truncation. Increasing tile_overlap mitigates this at
+        the cost of more compute per pixel.
         """
+        if tile_overlap >= tile_size:
+            raise ValueError(
+                f"tile_overlap ({tile_overlap}) must be < tile_size ({tile_size})"
+            )
         batch, h_lat, w_lat, c = z.shape
         sf = 2 ** (len(self.decoder.up_blocks) - 1)
         stride = tile_size - tile_overlap
@@ -238,19 +333,26 @@ class AutoencoderKL(nn.Module):
         out_tile = tile_size * sf
         out_overlap = tile_overlap * sf
 
-        # 1-D linear blend ramp for overlap blending
-        ramp = mx.concatenate([
-            mx.linspace(0.0, 1.0, out_overlap),
-            mx.ones(out_tile - 2 * out_overlap),
-            mx.linspace(1.0, 0.0, out_overlap),
-        ])
-        # 2-D separable blend weight (H_tile, W_tile, 1)
-        blend_h = ramp[: out_tile, None, None]
-        blend_w = ramp[None, : out_tile, None]
+        # Derive output channels from the decoder's conv_out layer
+        # MLX Conv2d weight shape: (out_channels, kH, kW, in_channels)
+        out_channels = self.decoder.conv_out.weight.shape[0]
 
-        output = mx.zeros((batch, out_h, out_w, 3))
+        # 1-D linear blend ramp for overlap blending
+        ramp = mx.concatenate(
+            [
+                mx.linspace(0.0, 1.0, out_overlap),
+                mx.ones(out_tile - 2 * out_overlap),
+                mx.linspace(1.0, 0.0, out_overlap),
+            ]
+        )
+        # 2-D separable blend weight (H_tile, W_tile, 1)
+        blend_h = ramp[:out_tile, None, None]
+        blend_w = ramp[None, :out_tile, None]
+
+        output = mx.zeros((batch, out_h, out_w, out_channels))
         weight = mx.zeros((1, out_h, out_w, 1))
 
+        n_tiles = 0
         for y in range(0, h_lat, stride):
             for x in range(0, w_lat, stride):
                 # Clamp tile boundaries
@@ -274,5 +376,7 @@ class AutoencoderKL(nn.Module):
                 output[:, oy : oy + oh, ox : ox + ow, :] += decoded * tile_blend
                 weight[:, oy : oy + oh, ox : ox + ow, :] += tile_blend
                 mx.eval(output, weight)
+                n_tiles += 1
 
+        logger.debug("Tiled decode completed: %d tiles processed", n_tiles)
         return output / mx.maximum(weight, 1e-8)

@@ -21,7 +21,7 @@ from .flow.raft_bridge import compute_flows_via_raft
 from .models.controlnet import ControlNetModel
 from .models.text_encoder import CLIPTextModel
 from .models.unet import UNet2DConditionModel
-from .models.vae import AutoencoderKL
+from .models.vae import AutoencoderKL, DEFAULT_TILE_OVERLAP, DEFAULT_TILE_SIZE
 from .scheduler import MLXDDPMScheduler
 from .weight_utils import load_safetensors_for_mlx
 
@@ -101,15 +101,31 @@ class MLXStableVSRPipeline:
             layers_per_block=unet_config.get("layers_per_block", 2),
             cross_attention_dim=unet_config.get("cross_attention_dim", 1024),
             attention_head_dim=unet_config.get("attention_head_dim", 8),
-            only_cross_attention=tuple(unet_config.get("only_cross_attention", [False] * 4)),
-            down_block_types=tuple(unet_config.get(
-                "down_block_types",
-                ["DownBlock2D", "CrossAttnDownBlock2D", "CrossAttnDownBlock2D", "CrossAttnDownBlock2D"],
-            )),
-            up_block_types=tuple(unet_config.get(
-                "up_block_types",
-                ["CrossAttnUpBlock2D", "CrossAttnUpBlock2D", "CrossAttnUpBlock2D", "UpBlock2D"],
-            )),
+            only_cross_attention=tuple(
+                unet_config.get("only_cross_attention", [False] * 4)
+            ),
+            down_block_types=tuple(
+                unet_config.get(
+                    "down_block_types",
+                    [
+                        "DownBlock2D",
+                        "CrossAttnDownBlock2D",
+                        "CrossAttnDownBlock2D",
+                        "CrossAttnDownBlock2D",
+                    ],
+                )
+            ),
+            up_block_types=tuple(
+                unet_config.get(
+                    "up_block_types",
+                    [
+                        "CrossAttnUpBlock2D",
+                        "CrossAttnUpBlock2D",
+                        "CrossAttnUpBlock2D",
+                        "UpBlock2D",
+                    ],
+                )
+            ),
         )
 
         # Build ControlNet
@@ -120,14 +136,26 @@ class MLXStableVSRPipeline:
             layers_per_block=cn_config.get("layers_per_block", 2),
             cross_attention_dim=cn_config.get("cross_attention_dim", 1024),
             attention_head_dim=cn_config.get("attention_head_dim", 8),
-            only_cross_attention=tuple(cn_config.get("only_cross_attention", [True, True, True, False])),
-            conditioning_embedding_out_channels=tuple(cn_config.get(
-                "conditioning_embedding_out_channels", [64, 128, 256],
-            )),
-            down_block_types=tuple(cn_config.get(
-                "down_block_types",
-                ["DownBlock2D", "CrossAttnDownBlock2D", "CrossAttnDownBlock2D", "CrossAttnDownBlock2D"],
-            )),
+            only_cross_attention=tuple(
+                cn_config.get("only_cross_attention", [True, True, True, False])
+            ),
+            conditioning_embedding_out_channels=tuple(
+                cn_config.get(
+                    "conditioning_embedding_out_channels",
+                    [64, 128, 256],
+                )
+            ),
+            down_block_types=tuple(
+                cn_config.get(
+                    "down_block_types",
+                    [
+                        "DownBlock2D",
+                        "CrossAttnDownBlock2D",
+                        "CrossAttnDownBlock2D",
+                        "CrossAttnDownBlock2D",
+                    ],
+                )
+            ),
         )
 
         # Build scheduler
@@ -156,7 +184,9 @@ class MLXStableVSRPipeline:
         te_weights = load_safetensors_for_mlx(
             model_path / "text_encoder" / "model.safetensors",
         )
-        _load_weights_into_model(text_encoder, te_weights, prefix_map={"text_model.": ""})
+        _load_weights_into_model(
+            text_encoder, te_weights, prefix_map={"text_model.": ""}
+        )
 
         logger.info("Loading VAE weights...")
         vae_weights = load_safetensors_for_mlx(
@@ -182,14 +212,23 @@ class MLXStableVSRPipeline:
         # Convert to target dtype
         if dtype != mx.float32:
             for model in (text_encoder, vae, unet, controlnet):
-                params = {k: v.astype(dtype) for k, v in nn.utils.tree_flatten(model.parameters())}
+                params = {
+                    k: v.astype(dtype)
+                    for k, v in nn.utils.tree_flatten(model.parameters())
+                }
                 model.load_weights(list(params.items()))
 
-        mx.eval(text_encoder.parameters(), vae.parameters(), unet.parameters(), controlnet.parameters())
+        mx.eval(
+            text_encoder.parameters(),
+            vae.parameters(),
+            unet.parameters(),
+            controlnet.parameters(),
+        )
 
         # Load tokenizer (keep as HuggingFace for compatibility)
         try:
             from transformers import CLIPTokenizer
+
             tokenizer = CLIPTokenizer.from_pretrained(str(model_path / "tokenizer"))
         except Exception:
             tokenizer = None
@@ -250,6 +289,9 @@ class MLXStableVSRPipeline:
         of_rescale_factor: int = 1,
         seed: int | None = None,
         progress_callback: Any | None = None,
+        force_tiled_vae: bool | None = None,
+        tile_size: int = DEFAULT_TILE_SIZE,
+        tile_overlap: int = DEFAULT_TILE_OVERLAP,
     ) -> list[np.ndarray]:
         """Run video super-resolution.
 
@@ -264,6 +306,9 @@ class MLXStableVSRPipeline:
             of_rescale_factor: Optical flow rescale factor.
             seed: Random seed for reproducibility.
             progress_callback: Called with (step, total_steps) for progress tracking.
+            force_tiled_vae: True → always tile; False → never tile; None → auto.
+            tile_size: Tile size in latent pixels for tiled VAE decode.
+            tile_overlap: Overlap in latent pixels for tiled VAE decode.
 
         Returns:
             List of SR frames as (H, W, 3) uint8 numpy arrays.
@@ -301,6 +346,7 @@ class MLXStableVSRPipeline:
 
         # Also upscale torch tensors for RAFT
         import torch.nn.functional as F
+
         upscaled_torch = [
             F.interpolate(img, scale_factor=4, mode="bicubic", align_corners=False)
             for img in images_torch
@@ -352,7 +398,12 @@ class MLXStableVSRPipeline:
                 # Temporal Texture Guidance (for non-first frames)
                 if frame_idx != 0 and x0_est is not None:
                     # Decode x0_est to pixel space (tiled to avoid OOM)
-                    x0_decoded = self.vae.tiled_decode(x0_est / self.vae.scaling_factor)
+                    x0_decoded = self.vae.smart_decode(
+                        x0_est / self.vae.scaling_factor,
+                        force_tiled=force_tiled_vae,
+                        tile_size=tile_size,
+                        tile_overlap=tile_overlap,
+                    )
                     mx.eval(x0_decoded)
 
                     # Warp to current frame
@@ -370,10 +421,14 @@ class MLXStableVSRPipeline:
                 # Concat image conditioning (7 channel input)
                 # UNet takes LR image at latent resolution, not upscaled image
                 if do_cfg:
-                    image_for_unet = mx.concatenate([lr_image_cond, lr_image_cond], axis=0)
+                    image_for_unet = mx.concatenate(
+                        [lr_image_cond, lr_image_cond], axis=0
+                    )
                 else:
                     image_for_unet = lr_image_cond
-                latent_model_input = mx.concatenate([latent_input, image_for_unet], axis=-1)
+                latent_model_input = mx.concatenate(
+                    [latent_input, image_for_unet], axis=-1
+                )
 
                 timestep_batch = mx.array([t] * latent_model_input.shape[0])
 
@@ -383,7 +438,9 @@ class MLXStableVSRPipeline:
                     mid_residual = None
                 else:
                     if do_cfg:
-                        cn_cond = mx.concatenate([warped_prev_est, warped_prev_est], axis=0)
+                        cn_cond = mx.concatenate(
+                            [warped_prev_est, warped_prev_est], axis=0
+                        )
                     else:
                         cn_cond = warped_prev_est
 
@@ -413,7 +470,10 @@ class MLXStableVSRPipeline:
 
                 # Scheduler step
                 output = self.scheduler.step(
-                    noise_pred, t, latents[frame_idx], seed=seed,
+                    noise_pred,
+                    t,
+                    latents[frame_idx],
+                    seed=seed,
                 )
                 latents[frame_idx] = output.prev_sample
                 x0_est = output.pred_original_sample
@@ -438,7 +498,12 @@ class MLXStableVSRPipeline:
         logger.info("Decoding final latents...")
         output_frames = []
         for latent in latents:
-            decoded = self.vae.tiled_decode(latent / self.vae.scaling_factor)
+            decoded = self.vae.smart_decode(
+                latent / self.vae.scaling_factor,
+                force_tiled=force_tiled_vae,
+                tile_size=tile_size,
+                tile_overlap=tile_overlap,
+            )
             mx.eval(decoded)
 
             # Convert to uint8 numpy
@@ -461,7 +526,7 @@ def _load_weights_into_model(
             new_k = k
             for old_prefix, new_prefix in prefix_map.items():
                 if new_k.startswith(old_prefix):
-                    new_k = new_prefix + new_k[len(old_prefix):]
+                    new_k = new_prefix + new_k[len(old_prefix) :]
             remapped[new_k] = v
         weights = remapped
 

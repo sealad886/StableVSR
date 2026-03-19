@@ -10,6 +10,7 @@ nn = pytest.importorskip("mlx.nn")
 # nn/attention.py
 # ---------------------------------------------------------------------------
 
+
 class TestCrossAttention:
     def test_self_attention_shape(self):
         from stablevsr.mlx.nn.attention import CrossAttention
@@ -24,7 +25,9 @@ class TestCrossAttention:
     def test_cross_attention_shape(self):
         from stablevsr.mlx.nn.attention import CrossAttention
 
-        attn = CrossAttention(query_dim=64, cross_attention_dim=128, heads=4, dim_head=16)
+        attn = CrossAttention(
+            query_dim=64, cross_attention_dim=128, heads=4, dim_head=16
+        )
         mx.eval(attn.parameters())
         q = mx.random.normal((1, 8, 64))
         kv = mx.random.normal((1, 12, 128))
@@ -38,7 +41,9 @@ class TestBasicTransformerBlock:
         from stablevsr.mlx.nn.attention import BasicTransformerBlock
 
         block = BasicTransformerBlock(
-            dim=64, num_attention_heads=4, attention_head_dim=16,
+            dim=64,
+            num_attention_heads=4,
+            attention_head_dim=16,
             cross_attention_dim=128,
         )
         mx.eval(block.parameters())
@@ -52,8 +57,11 @@ class TestBasicTransformerBlock:
         from stablevsr.mlx.nn.attention import BasicTransformerBlock
 
         block = BasicTransformerBlock(
-            dim=64, num_attention_heads=4, attention_head_dim=16,
-            cross_attention_dim=128, only_cross_attention=True,
+            dim=64,
+            num_attention_heads=4,
+            attention_head_dim=16,
+            cross_attention_dim=128,
+            only_cross_attention=True,
         )
         mx.eval(block.parameters())
         x = mx.random.normal((1, 8, 64))
@@ -68,8 +76,11 @@ class TestTransformer2DModel:
         from stablevsr.mlx.nn.attention import Transformer2DModel
 
         model = Transformer2DModel(
-            num_attention_heads=4, attention_head_dim=16,
-            in_channels=64, num_layers=1, cross_attention_dim=128,
+            num_attention_heads=4,
+            attention_head_dim=16,
+            in_channels=64,
+            num_layers=1,
+            cross_attention_dim=128,
         )
         mx.eval(model.parameters())
         x = mx.random.normal((1, 8, 8, 64))
@@ -82,8 +93,10 @@ class TestTransformer2DModel:
         from stablevsr.mlx.nn.attention import Transformer2DModel
 
         model = Transformer2DModel(
-            num_attention_heads=2, attention_head_dim=16,
-            in_channels=32, num_layers=1,
+            num_attention_heads=2,
+            attention_head_dim=16,
+            in_channels=32,
+            num_layers=1,
         )
         mx.eval(model.parameters())
         x = mx.zeros((1, 4, 4, 32))
@@ -95,6 +108,7 @@ class TestTransformer2DModel:
 # ---------------------------------------------------------------------------
 # nn/resnet.py
 # ---------------------------------------------------------------------------
+
 
 class TestResnetBlock2D:
     def test_same_channels(self):
@@ -133,6 +147,7 @@ class TestResnetBlock2D:
 # ---------------------------------------------------------------------------
 # nn/sampling.py
 # ---------------------------------------------------------------------------
+
 
 class TestUpsample2D:
     def test_2x_upsample(self):
@@ -179,6 +194,7 @@ class TestDownsample2D:
 # ---------------------------------------------------------------------------
 # flow/__init__.py
 # ---------------------------------------------------------------------------
+
 
 class TestGridSample:
     def test_output_shape_matches_grid(self):
@@ -241,7 +257,9 @@ class TestFlowWarp:
         warped = flow_warp(x, flow, padding_mode="border")
         mx.eval(x, warped)
         diff = mx.abs(warped - x).max().item()
-        assert diff < 1e-4, f"Zero-flow warp on constant image diverged: max diff={diff}"
+        assert (
+            diff < 1e-4
+        ), f"Zero-flow warp on constant image diverged: max diff={diff}"
 
     def test_output_shape(self):
         from stablevsr.mlx.flow import flow_warp
@@ -275,9 +293,11 @@ class TestBicubicUpsample:
 # scheduler.py
 # ---------------------------------------------------------------------------
 
+
 class TestMLXDDPMScheduler:
     def setup_method(self):
         from stablevsr.mlx.scheduler import MLXDDPMScheduler
+
         self.scheduler = MLXDDPMScheduler()
 
     def test_set_timesteps(self):
@@ -331,10 +351,12 @@ class TestMLXDDPMScheduler:
 # models/text_encoder.py
 # ---------------------------------------------------------------------------
 
+
 class TestCLIPTextModel:
     @pytest.fixture(autouse=True)
     def _build(self):
         from stablevsr.mlx.models.text_encoder import CLIPTextModel
+
         self.model = CLIPTextModel(
             vocab_size=49408,
             hidden_size=64,
@@ -368,10 +390,12 @@ class TestCLIPTextModel:
 # models/vae.py
 # ---------------------------------------------------------------------------
 
+
 class TestAutoencoderKL:
     @pytest.fixture(autouse=True)
     def _build(self):
         from stablevsr.mlx.models.vae import AutoencoderKL
+
         self.vae = AutoencoderKL(
             in_channels=3,
             out_channels=3,
@@ -408,10 +432,12 @@ class TestAutoencoderKL:
 # models/unet.py
 # ---------------------------------------------------------------------------
 
+
 class TestUNet2DConditionModel:
     @pytest.fixture(autouse=True)
     def _build(self):
         from stablevsr.mlx.models.unet import UNet2DConditionModel
+
         self.unet = UNet2DConditionModel(
             in_channels=7,
             out_channels=4,
@@ -447,9 +473,13 @@ class TestUNet2DConditionModel:
         ]
         mid_res = mx.zeros((1, 8, 8, 64))
 
-        out = self.unet(sample, t, enc,
-                        down_block_additional_residuals=down_res,
-                        mid_block_additional_residual=mid_res)
+        out = self.unet(
+            sample,
+            t,
+            enc,
+            down_block_additional_residuals=down_res,
+            mid_block_additional_residual=mid_res,
+        )
         mx.eval(out)
         assert out.shape == (1, 16, 16, 4)
 
@@ -458,10 +488,12 @@ class TestUNet2DConditionModel:
 # models/controlnet.py
 # ---------------------------------------------------------------------------
 
+
 class TestControlNetModel:
     @pytest.fixture(autouse=True)
     def _build(self):
         from stablevsr.mlx.models.controlnet import ControlNetModel
+
         self.cnet = ControlNetModel(
             in_channels=7,
             conditioning_channels=3,
@@ -495,8 +527,230 @@ class TestControlNetModel:
         enc = mx.random.normal((1, 10, 64))
         cond = mx.random.normal((1, 16, 16, 3))
 
-        down1, mid1 = self.cnet(sample, t, enc, controlnet_cond=cond, conditioning_scale=1.0)
-        down2, mid2 = self.cnet(sample, t, enc, controlnet_cond=cond, conditioning_scale=0.0)
+        down1, mid1 = self.cnet(
+            sample, t, enc, controlnet_cond=cond, conditioning_scale=1.0
+        )
+        down2, mid2 = self.cnet(
+            sample, t, enc, controlnet_cond=cond, conditioning_scale=0.0
+        )
         mx.eval(mid1, mid2)
 
         assert mx.abs(mid2).max().item() == pytest.approx(0.0, abs=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# models/unet.py — match_spatial_dims helper
+# ---------------------------------------------------------------------------
+
+
+class TestSpatialReconciliation:
+    """Tests for the match_spatial_dims skip-connection reconciliation helper."""
+
+    def setup_method(self):
+        from stablevsr.mlx.models.unet import match_spatial_dims
+
+        self.fn = match_spatial_dims
+
+    def test_noop_when_shapes_match(self):
+        """When spatial dims already match, returns input unchanged."""
+        hidden = mx.random.normal((1, 64, 64, 256))
+        target = mx.random.normal((1, 64, 64, 256))
+        result = self.fn(hidden, target)
+        assert result.shape == hidden.shape
+        assert mx.array_equal(result, hidden)
+
+    def test_crop_height_by_one(self):
+        """Crops 1 pixel off height when upsampled is 1 taller."""
+        hidden = mx.random.normal((1, 136, 240, 512))
+        target = mx.random.normal((1, 135, 240, 512))
+        result = self.fn(hidden, target)
+        assert result.shape == (1, 135, 240, 512)
+        assert mx.array_equal(result, hidden[:, :135, :, :])
+
+    def test_crop_width_by_one(self):
+        """Crops 1 pixel off width when upsampled is 1 wider."""
+        hidden = mx.random.normal((1, 128, 241, 256))
+        target = mx.random.normal((1, 128, 240, 256))
+        result = self.fn(hidden, target)
+        assert result.shape == (1, 128, 240, 256)
+
+    def test_crop_both_dims(self):
+        """Crops both height and width by 1."""
+        hidden = mx.random.normal((1, 136, 242, 512))
+        target = mx.random.normal((1, 135, 241, 512))
+        result = self.fn(hidden, target)
+        assert result.shape == (1, 135, 241, 512)
+
+    def test_even_dimensions_no_crop(self):
+        """Even input dimensions: downsample/upsample is exact, no crop needed."""
+        hidden = mx.random.normal((1, 128, 256, 512))
+        target = mx.random.normal((1, 128, 256, 512))
+        result = self.fn(hidden, target)
+        assert result.shape == (1, 128, 256, 512)
+        assert mx.array_equal(result, hidden)
+
+    def test_odd_then_even_dimensions(self):
+        """Typical odd-dimension scenario: 270→135→68→136 vs skip=135."""
+        hidden = mx.random.normal((2, 136, 240, 512))  # upsampled from 68
+        target = mx.random.normal((2, 135, 240, 512))  # skip from 270→135
+        result = self.fn(hidden, target)
+        assert result.shape == (2, 135, 240, 512)
+
+    def test_various_aspect_ratios(self):
+        """Different aspect ratios all reconcile correctly."""
+        cases = [
+            ((1, 68, 120, 128), (1, 67, 120, 128)),  # portrait-ish, height crop
+            ((1, 120, 68, 128), (1, 120, 67, 128)),  # landscape-ish, width crop
+            ((1, 91, 161, 64), (1, 90, 160, 64)),  # both odd → both crop
+            ((1, 200, 200, 64), (1, 200, 200, 64)),  # square, no crop
+        ]
+        for hidden_shape, target_shape in cases:
+            hidden = mx.random.normal(hidden_shape)
+            target = mx.random.normal(target_shape)
+            result = self.fn(hidden, target)
+            assert result.shape == target_shape, (
+                f"Expected {target_shape}, got {result.shape}"
+            )
+
+    def test_raises_when_hidden_smaller(self):
+        """If upsampled tensor is smaller than skip, it's a structural bug."""
+        hidden = mx.random.normal((1, 63, 120, 256))
+        target = mx.random.normal((1, 64, 120, 256))
+        with pytest.raises(ValueError, match="smaller than skip"):
+            self.fn(hidden, target)
+
+    def test_raises_when_mismatch_exceeds_one(self):
+        """A >1 pixel mismatch is not normal upsampling behavior."""
+        hidden = mx.random.normal((1, 130, 120, 256))
+        target = mx.random.normal((1, 128, 120, 256))
+        with pytest.raises(ValueError, match="exceeds expected"):
+            self.fn(hidden, target)
+
+    def test_batch_dimension_preserved(self):
+        """Batch size is preserved through reconciliation."""
+        hidden = mx.random.normal((4, 136, 240, 512))
+        target = mx.random.normal((4, 135, 240, 512))
+        result = self.fn(hidden, target)
+        assert result.shape[0] == 4
+
+    def test_channel_dimension_preserved(self):
+        """Channel dimension is never modified."""
+        hidden = mx.random.normal((1, 136, 240, 1024))
+        target = mx.random.normal((1, 135, 240, 512))
+        result = self.fn(hidden, target)
+        assert result.shape[-1] == 1024
+
+
+# ---------------------------------------------------------------------------
+# models/vae.py — tiled decode and auto-detection
+# ---------------------------------------------------------------------------
+
+
+class TestTiledVAEDecode:
+    """Tests for tiled VAE decode, auto-detection, and smart_decode routing."""
+
+    def setup_method(self):
+        from stablevsr.mlx.models.vae import (
+            AutoencoderKL,
+            DEFAULT_TILE_OVERLAP,
+            DEFAULT_TILE_SIZE,
+            TILED_DECODE_LATENT_AREA_THRESHOLD,
+        )
+
+        self.AutoencoderKL = AutoencoderKL
+        self.DEFAULT_TILE_SIZE = DEFAULT_TILE_SIZE
+        self.DEFAULT_TILE_OVERLAP = DEFAULT_TILE_OVERLAP
+        self.THRESHOLD = TILED_DECODE_LATENT_AREA_THRESHOLD
+        self.vae = AutoencoderKL(
+            in_channels=3,
+            out_channels=3,
+            block_out_channels=(32, 64),
+            layers_per_block=1,
+            latent_channels=4,
+            norm_num_groups=32,
+        )
+
+    def test_should_tile_above_threshold(self):
+        """Auto-detection triggers for large latents."""
+        big = mx.zeros((1, 128, 128, 4))  # 16384 > 4096
+        assert self.vae.should_tile(big) is True
+
+    def test_should_not_tile_below_threshold(self):
+        """Auto-detection stays off for small latents."""
+        small = mx.zeros((1, 16, 16, 4))  # 256 < 4096
+        assert self.vae.should_tile(small) is False
+
+    def test_should_tile_at_boundary(self):
+        """At exactly the threshold, tiling is not activated (strict >)."""
+        boundary = mx.zeros((1, 64, 64, 4))  # 4096 == threshold
+        assert self.vae.should_tile(boundary) is False
+
+    def test_tiled_decode_output_shape(self):
+        """Tiled decode produces correct output spatial dimensions."""
+        z = mx.random.normal((1, 16, 16, 4))
+        result = self.vae.tiled_decode(z, tile_size=8, tile_overlap=2)
+        mx.eval(result)
+        sf = 2 ** (len(self.vae.decoder.up_blocks) - 1)
+        assert result.shape == (1, 16 * sf, 16 * sf, 3)
+
+    def test_tiled_decode_small_input_single_tile(self):
+        """Input smaller than tile_size processes as a single tile."""
+        z = mx.random.normal((1, 4, 4, 4))
+        result = self.vae.tiled_decode(z, tile_size=8, tile_overlap=2)
+        mx.eval(result)
+        sf = 2 ** (len(self.vae.decoder.up_blocks) - 1)
+        assert result.shape == (1, 4 * sf, 4 * sf, 3)
+
+    def test_tiled_vs_nontiled_similar_output(self):
+        """Tiled and non-tiled decode produce similar (not identical) output."""
+        z = mx.random.normal((1, 8, 8, 4))
+        direct = self.vae.decode(z)
+        tiled = self.vae.tiled_decode(z, tile_size=8, tile_overlap=2)
+        mx.eval(direct, tiled)
+        # With overlap=2 and tile_size=8 on 8x8 input → single tile, should match
+        assert direct.shape == tiled.shape
+
+    def test_smart_decode_force_tiled(self):
+        """force_tiled=True uses tiled decode even for small latents."""
+        z = mx.random.normal((1, 4, 4, 4))
+        result = self.vae.smart_decode(z, force_tiled=True, tile_size=4, tile_overlap=1)
+        mx.eval(result)
+        sf = 2 ** (len(self.vae.decoder.up_blocks) - 1)
+        assert result.shape == (1, 4 * sf, 4 * sf, 3)
+
+    def test_smart_decode_force_nontiled(self):
+        """force_tiled=False uses direct decode even for large latents."""
+        z = mx.random.normal((1, 8, 8, 4))
+        result = self.vae.smart_decode(z, force_tiled=False)
+        mx.eval(result)
+        sf = 2 ** (len(self.vae.decoder.up_blocks) - 1)
+        assert result.shape == (1, 8 * sf, 8 * sf, 3)
+
+    def test_smart_decode_auto_small(self):
+        """Auto mode skips tiling for small latents."""
+        z = mx.random.normal((1, 4, 4, 4))
+        result = self.vae.smart_decode(z)
+        mx.eval(result)
+        sf = 2 ** (len(self.vae.decoder.up_blocks) - 1)
+        assert result.shape == (1, 4 * sf, 4 * sf, 3)
+
+    def test_tile_overlap_ge_tile_size_raises(self):
+        """tile_overlap >= tile_size is invalid."""
+        z = mx.random.normal((1, 8, 8, 4))
+        with pytest.raises(ValueError, match="tile_overlap"):
+            self.vae.tiled_decode(z, tile_size=8, tile_overlap=8)
+
+    def test_tiled_decode_batch_size(self):
+        """Batch dimension is preserved."""
+        z = mx.random.normal((3, 8, 8, 4))
+        result = self.vae.tiled_decode(z, tile_size=8, tile_overlap=2)
+        mx.eval(result)
+        assert result.shape[0] == 3
+
+    def test_tiled_decode_odd_latent_size(self):
+        """Odd latent dimensions decode correctly."""
+        z = mx.random.normal((1, 9, 7, 4))
+        result = self.vae.tiled_decode(z, tile_size=8, tile_overlap=2)
+        mx.eval(result)
+        sf = 2 ** (len(self.vae.decoder.up_blocks) - 1)
+        assert result.shape == (1, 9 * sf, 7 * sf, 3)

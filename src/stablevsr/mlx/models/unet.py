@@ -9,6 +9,7 @@ Config: in_channels=7, out_channels=4, cross_attention_dim=1024,
 
 from __future__ import annotations
 
+import logging
 import math
 
 import mlx.core as mx
@@ -17,6 +18,55 @@ import mlx.nn as nn
 from ..nn.attention import Transformer2DModel
 from ..nn.resnet import ResnetBlock2D
 from ..nn.sampling import Downsample2D, Upsample2D
+
+logger = logging.getLogger(__name__)
+
+
+def match_spatial_dims(
+    hidden_states: mx.array,
+    target: mx.array,
+) -> mx.array:
+    """Crop hidden_states to match target's spatial dimensions if needed.
+
+    After nearest-neighbor 2× upsampling, the upsampled tensor can be exactly
+    1 pixel larger than the corresponding skip connection when the skip was
+    produced from an odd-sized input (e.g. 135 → floor(135/2)=67 → 67*2=134,
+    but skip is 135). This is an inherent property of integer division in
+    downsample/upsample pairs.
+
+    Invariants:
+        - hidden_states.shape[1] >= target.shape[1]  (height)
+        - hidden_states.shape[2] >= target.shape[2]  (width)
+        - Difference is at most 1 pixel per axis
+        - Crop is always from the bottom/right edge (top-left anchored)
+        - When shapes already match, this is a no-op (returns input unchanged)
+
+    This matches the behavior of diffusers' PyTorch implementation, where
+    F.interpolate produces exact target sizes via output_size parameter.
+    """
+    h_diff = hidden_states.shape[1] - target.shape[1]
+    w_diff = hidden_states.shape[2] - target.shape[2]
+    if h_diff == 0 and w_diff == 0:
+        return hidden_states
+    if h_diff < 0 or w_diff < 0:
+        raise ValueError(
+            f"Upsampled tensor ({hidden_states.shape}) is smaller than skip "
+            f"connection ({target.shape}). This indicates a structural bug in the "
+            f"UNet architecture, not an off-by-one from upsampling."
+        )
+    if h_diff > 1 or w_diff > 1:
+        raise ValueError(
+            f"Spatial mismatch of {h_diff}×{w_diff} exceeds expected ±1. "
+            f"hidden_states={hidden_states.shape}, target={target.shape}. "
+            f"This may indicate mismatched encoder/decoder block counts."
+        )
+    logger.debug(
+        "Cropping hidden_states %s → (%d, %d) to match skip connection",
+        hidden_states.shape,
+        target.shape[1],
+        target.shape[2],
+    )
+    return hidden_states[:, : target.shape[1], : target.shape[2], :]
 
 
 class TimestepEmbedding(nn.Module):
@@ -58,13 +108,18 @@ class CrossAttnDownBlock2D(nn.Module):
         attn_head_dim = out_channels // num_attention_heads
 
         self.resnets = [
-            ResnetBlock2D(in_channels if i == 0 else out_channels, out_channels, temb_channels)
+            ResnetBlock2D(
+                in_channels if i == 0 else out_channels, out_channels, temb_channels
+            )
             for i in range(num_layers)
         ]
         self.attentions = [
             Transformer2DModel(
-                num_attention_heads, attn_head_dim, out_channels,
-                num_layers=1, cross_attention_dim=cross_attention_dim,
+                num_attention_heads,
+                attn_head_dim,
+                out_channels,
+                num_layers=1,
+                cross_attention_dim=cross_attention_dim,
                 only_cross_attention=only_cross_attention,
             )
             for _ in range(num_layers)
@@ -102,7 +157,9 @@ class DownBlock2D(nn.Module):
     ):
         super().__init__()
         self.resnets = [
-            ResnetBlock2D(in_channels if i == 0 else out_channels, out_channels, temb_channels)
+            ResnetBlock2D(
+                in_channels if i == 0 else out_channels, out_channels, temb_channels
+            )
             for i in range(num_layers)
         ]
         self.downsamplers = [Downsample2D(out_channels)] if add_downsample else []
@@ -144,7 +201,8 @@ class CrossAttnUpBlock2D(nn.Module):
 
         self.resnets = [
             ResnetBlock2D(
-                (prev_output_channel if i == 0 else out_channels) + (out_channels if i > 0 else in_channels),
+                (prev_output_channel if i == 0 else out_channels)
+                + (out_channels if i > 0 else in_channels),
                 out_channels,
                 temb_channels,
             )
@@ -152,8 +210,11 @@ class CrossAttnUpBlock2D(nn.Module):
         ]
         self.attentions = [
             Transformer2DModel(
-                num_attention_heads, attn_head_dim, out_channels,
-                num_layers=1, cross_attention_dim=cross_attention_dim,
+                num_attention_heads,
+                attn_head_dim,
+                out_channels,
+                num_layers=1,
+                cross_attention_dim=cross_attention_dim,
                 only_cross_attention=only_cross_attention,
             )
             for _ in range(num_layers + 1)
@@ -169,9 +230,7 @@ class CrossAttnUpBlock2D(nn.Module):
     ) -> mx.array:
         for resnet, attn in zip(self.resnets, self.attentions):
             res = res_hidden_states_tuple.pop()
-            # Crop to match skip connection spatial dims (odd-size rounding)
-            if hidden_states.shape[1] != res.shape[1] or hidden_states.shape[2] != res.shape[2]:
-                hidden_states = hidden_states[:, :res.shape[1], :res.shape[2], :]
+            hidden_states = match_spatial_dims(hidden_states, res)
             hidden_states = mx.concatenate([hidden_states, res], axis=-1)
             hidden_states = resnet(hidden_states, temb)
             hidden_states = attn(hidden_states, encoder_hidden_states)
@@ -195,7 +254,8 @@ class UpBlock2D(nn.Module):
         super().__init__()
         self.resnets = [
             ResnetBlock2D(
-                (prev_output_channel if i == 0 else out_channels) + (out_channels if i > 0 else in_channels),
+                (prev_output_channel if i == 0 else out_channels)
+                + (out_channels if i > 0 else in_channels),
                 out_channels,
                 temb_channels,
             )
@@ -212,9 +272,7 @@ class UpBlock2D(nn.Module):
     ) -> mx.array:
         for resnet in self.resnets:
             res = res_hidden_states_tuple.pop()
-            # Crop to match skip connection spatial dims (odd-size rounding)
-            if hidden_states.shape[1] != res.shape[1] or hidden_states.shape[2] != res.shape[2]:
-                hidden_states = hidden_states[:, :res.shape[1], :res.shape[2], :]
+            hidden_states = match_spatial_dims(hidden_states, res)
             hidden_states = mx.concatenate([hidden_states, res], axis=-1)
             hidden_states = resnet(hidden_states, temb)
 
@@ -241,8 +299,11 @@ class UNetMidBlock2DCrossAttn(nn.Module):
         ]
         self.attentions = [
             Transformer2DModel(
-                num_attention_heads, attn_head_dim, in_channels,
-                num_layers=1, cross_attention_dim=cross_attention_dim,
+                num_attention_heads,
+                attn_head_dim,
+                in_channels,
+                num_layers=1,
+                cross_attention_dim=cross_attention_dim,
             ),
         ]
 
@@ -274,12 +335,16 @@ class UNet2DConditionModel(nn.Module):
         attention_head_dim: int = 8,
         only_cross_attention: tuple[bool, ...] | bool = False,
         down_block_types: tuple[str, ...] = (
-            "DownBlock2D", "CrossAttnDownBlock2D",
-            "CrossAttnDownBlock2D", "CrossAttnDownBlock2D",
+            "DownBlock2D",
+            "CrossAttnDownBlock2D",
+            "CrossAttnDownBlock2D",
+            "CrossAttnDownBlock2D",
         ),
         up_block_types: tuple[str, ...] = (
-            "CrossAttnUpBlock2D", "CrossAttnUpBlock2D",
-            "CrossAttnUpBlock2D", "UpBlock2D",
+            "CrossAttnUpBlock2D",
+            "CrossAttnUpBlock2D",
+            "CrossAttnUpBlock2D",
+            "UpBlock2D",
         ),
     ):
         super().__init__()
@@ -301,7 +366,9 @@ class UNet2DConditionModel(nn.Module):
             if btype == "CrossAttnDownBlock2D":
                 self.down_blocks.append(
                     CrossAttnDownBlock2D(
-                        ch_in, ch_out, time_embed_dim,
+                        ch_in,
+                        ch_out,
+                        time_embed_dim,
                         num_layers=layers_per_block,
                         num_attention_heads=n_heads[i],
                         cross_attention_dim=cross_attention_dim,
@@ -312,7 +379,9 @@ class UNet2DConditionModel(nn.Module):
             else:
                 self.down_blocks.append(
                     DownBlock2D(
-                        ch_in, ch_out, time_embed_dim,
+                        ch_in,
+                        ch_out,
+                        time_embed_dim,
                         num_layers=layers_per_block,
                         add_downsample=not is_last,
                     )
@@ -321,7 +390,8 @@ class UNet2DConditionModel(nn.Module):
 
         # Mid block
         self.mid_block = UNetMidBlock2DCrossAttn(
-            block_out_channels[-1], time_embed_dim,
+            block_out_channels[-1],
+            time_embed_dim,
             num_attention_heads=n_heads[-1],
             cross_attention_dim=cross_attention_dim,
         )
@@ -338,7 +408,10 @@ class UNet2DConditionModel(nn.Module):
             if btype == "CrossAttnUpBlock2D":
                 self.up_blocks.append(
                     CrossAttnUpBlock2D(
-                        ch_in, ch_out, prev_ch, time_embed_dim,
+                        ch_in,
+                        ch_out,
+                        prev_ch,
+                        time_embed_dim,
                         num_layers=layers_per_block,
                         num_attention_heads=n_heads[len(block_out_channels) - 1 - i],
                         cross_attention_dim=cross_attention_dim,
@@ -349,14 +422,19 @@ class UNet2DConditionModel(nn.Module):
             else:
                 self.up_blocks.append(
                     UpBlock2D(
-                        ch_in, ch_out, prev_ch, time_embed_dim,
+                        ch_in,
+                        ch_out,
+                        prev_ch,
+                        time_embed_dim,
                         num_layers=layers_per_block,
                         add_upsample=not is_last,
                     )
                 )
             ch_in = ch_out
 
-        self.conv_norm_out = nn.GroupNorm(32, block_out_channels[0], pytorch_compatible=True)
+        self.conv_norm_out = nn.GroupNorm(
+            32, block_out_channels[0], pytorch_compatible=True
+        )
         self.conv_out = nn.Conv2d(block_out_channels[0], out_channels, 3, padding=1)
 
     def __call__(
@@ -394,7 +472,9 @@ class UNet2DConditionModel(nn.Module):
         # 4. ControlNet residuals for down blocks
         if down_block_additional_residuals is not None:
             new_res = []
-            for res, ctrl in zip(down_block_res_samples, down_block_additional_residuals):
+            for res, ctrl in zip(
+                down_block_res_samples, down_block_additional_residuals
+            ):
                 new_res.append(res + ctrl)
             down_block_res_samples = new_res
 

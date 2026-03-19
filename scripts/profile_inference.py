@@ -78,15 +78,11 @@ def _get_memory_mb() -> float | None:
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Profile StableVSR inference pipeline"
-    )
+    parser = argparse.ArgumentParser(description="Profile StableVSR inference pipeline")
     parser.add_argument("--input", required=True)
     parser.add_argument("--frames", type=int, default=0, help="0=all")
     parser.add_argument("--steps", type=int, default=5)
-    parser.add_argument(
-        "--dtype", default="float32", choices=["float32", "float16"]
-    )
+    parser.add_argument("--dtype", default="float32", choices=["float32", "float16"])
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--model-id", default="claudiom4sir/StableVSR")
     parser.add_argument("--output", default=None)
@@ -101,6 +97,7 @@ def main():
     t0 = time.perf_counter()
     import torch
     from PIL import Image
+
     timings["import_core"] = time.perf_counter() - t0
 
     dtype_map = {"float32": torch.float32, "float16": torch.float16}
@@ -123,8 +120,7 @@ def main():
     input_dir = Path(args.input)
     t0 = time.perf_counter()
     paths = sorted(
-        p for p in input_dir.iterdir()
-        if p.is_file() and p.suffix.lower() in exts
+        p for p in input_dir.iterdir() if p.is_file() and p.suffix.lower() in exts
     )
     if args.frames > 0:
         paths = paths[: args.frames]
@@ -155,9 +151,7 @@ def main():
     pipe = StableVSRPipeline.from_pretrained(
         args.model_id, controlnet=cn, torch_dtype=dtype
     )
-    pipe.scheduler = DDPMScheduler.from_pretrained(
-        args.model_id, subfolder="scheduler"
-    )
+    pipe.scheduler = DDPMScheduler.from_pretrained(args.model_id, subfolder="scheduler")
     _sync_device(dev_type)
     timings["load_pipeline"] = time.perf_counter() - t0
     mem["after_pipeline_load"] = _get_memory_mb()
@@ -258,9 +252,7 @@ def main():
 
     print()
     print("METHOD-LEVEL BREAKDOWN:")
-    sorted_m = sorted(
-        method_stats.items(), key=lambda x: x[1]["total_s"], reverse=True
-    )
+    sorted_m = sorted(method_stats.items(), key=lambda x: x[1]["total_s"], reverse=True)
     for label, s in sorted_m:
         print(
             f"  {label:25s}  "

@@ -445,8 +445,10 @@ def cmd_benchmark(args: argparse.Namespace) -> None:  # noqa: C901
         device = torch.device("cpu")
     device_type = device.type
 
-    print(f"Benchmark: {width}x{height}, {num_frames} frames, {num_steps} steps, "
-          f"dtype={dtype_str}, device={device_type}")
+    print(
+        f"Benchmark: {width}x{height}, {num_frames} frames, {num_steps} steps, "
+        f"dtype={dtype_str}, device={device_type}"
+    )
 
     timings: dict[str, float] = {}
     t_total_start = time.perf_counter()
@@ -456,10 +458,14 @@ def cmd_benchmark(args: argparse.Namespace) -> None:  # noqa: C901
     t0 = time.perf_counter()
 
     controlnet = ControlNetModel.from_pretrained(
-        model_id, subfolder="controlnet", torch_dtype=dtype,
+        model_id,
+        subfolder="controlnet",
+        torch_dtype=dtype,
     )
     pipeline = StableVSRPipeline.from_pretrained(
-        model_id, controlnet=controlnet, torch_dtype=dtype,
+        model_id,
+        controlnet=controlnet,
+        torch_dtype=dtype,
     )
     scheduler = DDPMScheduler.from_pretrained(model_id, subfolder="scheduler")
     pipeline.scheduler = scheduler
@@ -497,14 +503,22 @@ def cmd_benchmark(args: argparse.Namespace) -> None:  # noqa: C901
     # Optional warmup iterations
     for wi in range(warmup):
         print(f"  warmup {wi + 1}/{warmup} ...")
-        pipeline("", frames, num_inference_steps=num_steps, guidance_scale=0, of_model=of_model)
+        pipeline(
+            "",
+            frames,
+            num_inference_steps=num_steps,
+            guidance_scale=0,
+            of_model=of_model,
+        )
         _sync(device_type)
 
     # --- Stage: inference ---
     _sync(device_type)
     t0 = time.perf_counter()
 
-    pipeline("", frames, num_inference_steps=num_steps, guidance_scale=0, of_model=of_model)
+    pipeline(
+        "", frames, num_inference_steps=num_steps, guidance_scale=0, of_model=of_model
+    )
 
     _sync(device_type)
     timings["inference"] = time.perf_counter() - t0
@@ -621,26 +635,43 @@ def build_parser() -> argparse.ArgumentParser:
     # -- benchmark subcommand --
     bench_p = sub.add_parser("benchmark", help="Run a synthetic pipeline benchmark")
     bench_p.add_argument(
-        "--steps", type=int, default=3, help="Inference steps (default: 3)",
+        "--steps",
+        type=int,
+        default=3,
+        help="Inference steps (default: 3)",
     )
     bench_p.add_argument(
-        "--frames", type=int, default=2, help="Number of synthetic frames (default: 2)",
+        "--frames",
+        type=int,
+        default=2,
+        help="Number of synthetic frames (default: 2)",
     )
     bench_p.add_argument(
-        "--resolution", default="128x128", help="Frame resolution WxH (default: 128x128)",
+        "--resolution",
+        default="128x128",
+        help="Frame resolution WxH (default: 128x128)",
     )
     bench_p.add_argument(
-        "--dtype", default="float32", choices=sorted(VALID_DTYPES),
+        "--dtype",
+        default="float32",
+        choices=sorted(VALID_DTYPES),
         help="Model precision (default: float32)",
     )
     bench_p.add_argument(
-        "--warmup", type=int, default=0, help="Warmup iterations before timed run (default: 0)",
+        "--warmup",
+        type=int,
+        default=0,
+        help="Warmup iterations before timed run (default: 0)",
     )
     bench_p.add_argument(
-        "--output", default=None, help="Optional path for JSON report output",
+        "--output",
+        default=None,
+        help="Optional path for JSON report output",
     )
     bench_p.add_argument(
-        "--model-id", default="claudiom4sir/StableVSR", help="Model ID or local path",
+        "--model-id",
+        default="claudiom4sir/StableVSR",
+        help="Model ID or local path",
     )
 
     return parser

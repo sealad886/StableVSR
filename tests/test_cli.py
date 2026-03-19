@@ -218,15 +218,23 @@ class TestBenchmarkParser:
 
     def test_parse_benchmark_custom_args(self):
         parser = build_parser()
-        args = parser.parse_args([
-            "benchmark",
-            "--steps", "5",
-            "--frames", "4",
-            "--resolution", "256x256",
-            "--dtype", "float16",
-            "--warmup", "1",
-            "--output", "/tmp/bench.json",
-        ])
+        args = parser.parse_args(
+            [
+                "benchmark",
+                "--steps",
+                "5",
+                "--frames",
+                "4",
+                "--resolution",
+                "256x256",
+                "--dtype",
+                "float16",
+                "--warmup",
+                "1",
+                "--output",
+                "/tmp/bench.json",
+            ]
+        )
         assert args.steps == 5
         assert args.frames == 4
         assert args.resolution == "256x256"

@@ -4,7 +4,9 @@ import torch.nn.functional as F
 _grid_cache: dict[tuple[int, int, str, str], torch.Tensor] = {}
 
 
-def _get_base_grid(H: int, W: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+def _get_base_grid(
+    H: int, W: int, device: torch.device, dtype: torch.dtype
+) -> torch.Tensor:
     key = (H, W, str(device), str(dtype))
     cached = _grid_cache.get(key)
     if cached is not None:

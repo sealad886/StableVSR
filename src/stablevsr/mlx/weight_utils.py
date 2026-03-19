@@ -47,7 +47,9 @@ def load_safetensors_for_mlx(
     converted: dict[str, mx.array] = {}
     for key, tensor in weights.items():
         if tensor.ndim == 4:
-            is_transpose = any(key.startswith(p) or f".{p}." in key for p in transpose_prefixes)
+            is_transpose = any(
+                key.startswith(p) or f".{p}." in key for p in transpose_prefixes
+            )
             if is_transpose:
                 # PyTorch ConvTranspose2d: (C_in, C_out, kH, kW) → MLX: (C_out, kH, kW, C_in)
                 tensor = mx.transpose(tensor, axes=(1, 2, 3, 0))
@@ -69,5 +71,7 @@ def validate_shapes(
         if key not in loaded:
             errors.append(f"Missing: {key}")
         elif loaded[key].shape != param.shape:
-            errors.append(f"Shape mismatch: {key}: loaded={loaded[key].shape} expected={param.shape}")
+            errors.append(
+                f"Shape mismatch: {key}: loaded={loaded[key].shape} expected={param.shape}"
+            )
     return errors

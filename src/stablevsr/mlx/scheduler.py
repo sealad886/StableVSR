@@ -49,9 +49,19 @@ class MLXDDPMScheduler:
 
         # Compute betas in float64 for precision
         if beta_schedule == "linear":
-            betas = np.linspace(beta_start, beta_end, num_train_timesteps, dtype=np.float64)
+            betas = np.linspace(
+                beta_start, beta_end, num_train_timesteps, dtype=np.float64
+            )
         elif beta_schedule == "scaled_linear":
-            betas = np.linspace(beta_start**0.5, beta_end**0.5, num_train_timesteps, dtype=np.float64) ** 2
+            betas = (
+                np.linspace(
+                    beta_start**0.5,
+                    beta_end**0.5,
+                    num_train_timesteps,
+                    dtype=np.float64,
+                )
+                ** 2
+            )
         else:
             raise NotImplementedError(f"{beta_schedule} not implemented")
 
@@ -79,13 +89,28 @@ class MLXDDPMScheduler:
 
         if self.timestep_spacing == "leading":
             step_ratio = self.num_train_timesteps // num_inference_steps
-            ts = (np.arange(0, num_inference_steps) * step_ratio).round()[::-1].copy().astype(np.int64)
+            ts = (
+                (np.arange(0, num_inference_steps) * step_ratio)
+                .round()[::-1]
+                .copy()
+                .astype(np.int64)
+            )
             ts += self.steps_offset
         elif self.timestep_spacing == "linspace":
-            ts = np.linspace(0, self.num_train_timesteps - 1, num_inference_steps).round()[::-1].copy().astype(np.int64)
+            ts = (
+                np.linspace(0, self.num_train_timesteps - 1, num_inference_steps)
+                .round()[::-1]
+                .copy()
+                .astype(np.int64)
+            )
         elif self.timestep_spacing == "trailing":
             step_ratio = self.num_train_timesteps / num_inference_steps
-            ts = np.round(np.arange(self.num_train_timesteps, 0, -step_ratio)).astype(np.int64) - 1
+            ts = (
+                np.round(np.arange(self.num_train_timesteps, 0, -step_ratio)).astype(
+                    np.int64
+                )
+                - 1
+            )
         else:
             raise ValueError(f"Unsupported timestep_spacing: {self.timestep_spacing}")
 
@@ -120,9 +145,14 @@ class MLXDDPMScheduler:
 
         # Predict x0
         if self.prediction_type == "epsilon":
-            pred_x0 = (sample_f32 - mx.sqrt(beta_prod_t) * model_output_f32) / mx.sqrt(alpha_prod_t)
+            pred_x0 = (sample_f32 - mx.sqrt(beta_prod_t) * model_output_f32) / mx.sqrt(
+                alpha_prod_t
+            )
         elif self.prediction_type == "v_prediction":
-            pred_x0 = mx.sqrt(alpha_prod_t) * sample_f32 - mx.sqrt(beta_prod_t) * model_output_f32
+            pred_x0 = (
+                mx.sqrt(alpha_prod_t) * sample_f32
+                - mx.sqrt(beta_prod_t) * model_output_f32
+            )
         elif self.prediction_type == "sample":
             pred_x0 = model_output_f32
         else:

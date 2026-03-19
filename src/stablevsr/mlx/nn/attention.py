@@ -130,14 +130,18 @@ class BasicTransformerBlock(nn.Module):
         hidden_states = self.norm1(hidden_states)
         hidden_states = self.attn1(
             hidden_states,
-            encoder_hidden_states=encoder_hidden_states if self.only_cross_attention else None,
+            encoder_hidden_states=(
+                encoder_hidden_states if self.only_cross_attention else None
+            ),
         )
         hidden_states = hidden_states + residual
 
         # Cross-attention
         residual = hidden_states
         hidden_states = self.norm2(hidden_states)
-        hidden_states = self.attn2(hidden_states, encoder_hidden_states=encoder_hidden_states)
+        hidden_states = self.attn2(
+            hidden_states, encoder_hidden_states=encoder_hidden_states
+        )
         hidden_states = hidden_states + residual
 
         # Feed-forward
@@ -194,7 +198,9 @@ class Transformer2DModel(nn.Module):
         hidden_states = self.proj_in(hidden_states)
 
         for block in self.transformer_blocks:
-            hidden_states = block(hidden_states, encoder_hidden_states=encoder_hidden_states)
+            hidden_states = block(
+                hidden_states, encoder_hidden_states=encoder_hidden_states
+            )
 
         hidden_states = self.proj_out(hidden_states)
         hidden_states = hidden_states.reshape(batch, height, width, -1)

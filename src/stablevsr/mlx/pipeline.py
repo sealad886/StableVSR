@@ -9,6 +9,7 @@ from __future__ import annotations
 import gc
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -292,6 +293,8 @@ class MLXStableVSRPipeline:
         force_tiled_vae: bool | None = None,
         tile_size: int = DEFAULT_TILE_SIZE,
         tile_overlap: int = DEFAULT_TILE_OVERLAP,
+        ttg_start_step: int = 0,
+        compile_models: bool = False,
     ) -> list[np.ndarray]:
         """Run video super-resolution.
 
@@ -309,6 +312,13 @@ class MLXStableVSRPipeline:
             force_tiled_vae: True → always tile; False → never tile; None → auto.
             tile_size: Tile size in latent pixels for tiled VAE decode.
             tile_overlap: Overlap in latent pixels for tiled VAE decode.
+            ttg_start_step: Denoising step to begin temporal texture guidance.
+                Steps before this skip VAE decode + flow warp (saves time on
+                noisy early steps where temporal guidance has minimal benefit).
+                0 = all steps (default). Higher values save more time at the
+                cost of reduced temporal consistency.
+            compile_models: If True, use mx.compile on UNet/ControlNet forward
+                passes for fused GPU kernel execution (~30-50% speedup).
 
         Returns:
             List of SR frames as (H, W, 3) uint8 numpy arrays.
@@ -381,12 +391,47 @@ class MLXStableVSRPipeline:
 
         # 7. Denoising loop with bidirectional temporal sampling
         logger.info(f"Denoising: {len(timesteps)} steps x {n_frames} frames...")
+        if ttg_start_step > 0:
+            logger.info(
+                f"Temporal texture guidance starts at step {ttg_start_step}"
+            )
         reversed_order = False
         total_ops = len(timesteps) * n_frames
         op_count = 0
 
         x0_est: mx.array | None = None
         warped_prev_est: mx.array | None = None
+
+        # Optionally compile model forward passes for fused GPU execution
+        if compile_models:
+            logger.info("Compiling UNet and ControlNet with mx.compile...")
+
+            @mx.compile
+            def _compiled_unet(sample, timestep, enc, *residuals):
+                if len(residuals) == 0:
+                    return self.unet(sample, timestep, enc)
+                down_res_list = list(residuals[:-1])
+                mid_res = residuals[-1]
+                return self.unet(
+                    sample, timestep, enc,
+                    down_block_additional_residuals=down_res_list,
+                    mid_block_additional_residual=mid_res,
+                )
+
+            @mx.compile
+            def _compiled_controlnet(sample, timestep, enc, cond, scale):
+                return self.controlnet(
+                    sample, timestep, enc,
+                    controlnet_cond=cond,
+                    conditioning_scale=scale,
+                )
+
+        # Stage timing accumulators
+        _t_vae_decode = 0.0
+        _t_flow_warp = 0.0
+        _t_controlnet = 0.0
+        _t_unet = 0.0
+        _t_scheduler = 0.0
 
         for step_idx, t in enumerate(timesteps):
             flows = forward_flows if not reversed_order else backward_flows
@@ -395,9 +440,15 @@ class MLXStableVSRPipeline:
                 # LR image for UNet conditioning (same spatial res as latents)
                 lr_image_cond = images_mlx[frame_idx]
 
-                # Temporal Texture Guidance (for non-first frames)
-                if frame_idx != 0 and x0_est is not None:
+                # Temporal Texture Guidance (for non-first frames, after ttg_start_step)
+                use_ttg = (
+                    frame_idx != 0
+                    and x0_est is not None
+                    and step_idx >= ttg_start_step
+                )
+                if use_ttg:
                     # Decode x0_est to pixel space (tiled to avoid OOM)
+                    _t0 = time.perf_counter()
                     x0_decoded = self.vae.smart_decode(
                         x0_est / self.vae.scaling_factor,
                         force_tiled=force_tiled_vae,
@@ -405,12 +456,15 @@ class MLXStableVSRPipeline:
                         tile_overlap=tile_overlap,
                     )
                     mx.eval(x0_decoded)
+                    _t_vae_decode += time.perf_counter() - _t0
 
                     # Warp to current frame
+                    _t0 = time.perf_counter()
                     warped_prev_est = flow_warp(
                         x0_decoded, flows[frame_idx - 1], interp_mode=interp_mode
                     )
                     mx.eval(warped_prev_est)
+                    _t_flow_warp += time.perf_counter() - _t0
 
                 # Prepare UNet input
                 latent_input = latents[frame_idx]
@@ -432,11 +486,12 @@ class MLXStableVSRPipeline:
 
                 timestep_batch = mx.array([t] * latent_model_input.shape[0])
 
-                # ControlNet (only for non-first frames with temporal guidance)
-                if frame_idx == 0 or warped_prev_est is None:
+                # ControlNet (only when temporal guidance is active)
+                if not use_ttg or warped_prev_est is None:
                     down_residuals = None
                     mid_residual = None
                 else:
+                    _t0 = time.perf_counter()
                     if do_cfg:
                         cn_cond = mx.concatenate(
                             [warped_prev_est, warped_prev_est], axis=0
@@ -444,24 +499,52 @@ class MLXStableVSRPipeline:
                     else:
                         cn_cond = warped_prev_est
 
-                    down_residuals, mid_residual = self.controlnet(
+                    if compile_models:
+                        down_residuals, mid_residual = _compiled_controlnet(
+                            latent_model_input,
+                            timestep_batch,
+                            prompt_embeds,
+                            cn_cond,
+                            controlnet_conditioning_scale,
+                        )
+                    else:
+                        down_residuals, mid_residual = self.controlnet(
+                            latent_model_input,
+                            timestep_batch,
+                            prompt_embeds,
+                            controlnet_cond=cn_cond,
+                            conditioning_scale=controlnet_conditioning_scale,
+                        )
+                    mx.eval(down_residuals, mid_residual)
+                    _t_controlnet += time.perf_counter() - _t0
+
+                # UNet noise prediction
+                _t0 = time.perf_counter()
+                if compile_models:
+                    if down_residuals is not None:
+                        noise_pred = _compiled_unet(
+                            latent_model_input,
+                            timestep_batch,
+                            prompt_embeds,
+                            *down_residuals,
+                            mid_residual,
+                        )
+                    else:
+                        noise_pred = _compiled_unet(
+                            latent_model_input,
+                            timestep_batch,
+                            prompt_embeds,
+                        )
+                else:
+                    noise_pred = self.unet(
                         latent_model_input,
                         timestep_batch,
                         prompt_embeds,
-                        controlnet_cond=cn_cond,
-                        conditioning_scale=controlnet_conditioning_scale,
+                        down_block_additional_residuals=down_residuals,
+                        mid_block_additional_residual=mid_residual,
                     )
-                    mx.eval(down_residuals, mid_residual)
-
-                # UNet noise prediction
-                noise_pred = self.unet(
-                    latent_model_input,
-                    timestep_batch,
-                    prompt_embeds,
-                    down_block_additional_residuals=down_residuals,
-                    mid_block_additional_residual=mid_residual,
-                )
                 mx.eval(noise_pred)
+                _t_unet += time.perf_counter() - _t0
 
                 # Classifier-free guidance
                 if do_cfg:
@@ -469,6 +552,7 @@ class MLXStableVSRPipeline:
                     noise_pred = uncond + guidance_scale * (cond - uncond)
 
                 # Scheduler step
+                _t0 = time.perf_counter()
                 output = self.scheduler.step(
                     noise_pred,
                     t,
@@ -478,6 +562,7 @@ class MLXStableVSRPipeline:
                 latents[frame_idx] = output.prev_sample
                 x0_est = output.pred_original_sample
                 mx.eval(latents[frame_idx], x0_est)
+                _t_scheduler += time.perf_counter() - _t0
 
                 op_count += 1
                 if progress_callback:
@@ -493,6 +578,15 @@ class MLXStableVSRPipeline:
         # Restore correct order
         if reversed_order:
             latents.reverse()
+
+        logger.info(
+            "Denoising stage timing: "
+            f"vae_decode={_t_vae_decode:.1f}s, "
+            f"flow_warp={_t_flow_warp:.1f}s, "
+            f"controlnet={_t_controlnet:.1f}s, "
+            f"unet={_t_unet:.1f}s, "
+            f"scheduler={_t_scheduler:.1f}s"
+        )
 
         # 8. Decode final latents
         logger.info("Decoding final latents...")

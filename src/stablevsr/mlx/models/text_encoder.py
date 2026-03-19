@@ -33,13 +33,29 @@ class CLIPAttention(nn.Module):
         self.v_proj = nn.Linear(hidden_size, hidden_size)
         self.out_proj = nn.Linear(hidden_size, hidden_size)
 
-    def __call__(self, hidden_states: mx.array, causal_mask: mx.array | None = None) -> mx.array:
+    def __call__(
+        self, hidden_states: mx.array, causal_mask: mx.array | None = None
+    ) -> mx.array:
         B, L, _ = hidden_states.shape
-        q = self.q_proj(hidden_states).reshape(B, L, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
-        k = self.k_proj(hidden_states).reshape(B, L, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
-        v = self.v_proj(hidden_states).reshape(B, L, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
+        q = (
+            self.q_proj(hidden_states)
+            .reshape(B, L, self.num_heads, self.head_dim)
+            .transpose(0, 2, 1, 3)
+        )
+        k = (
+            self.k_proj(hidden_states)
+            .reshape(B, L, self.num_heads, self.head_dim)
+            .transpose(0, 2, 1, 3)
+        )
+        v = (
+            self.v_proj(hidden_states)
+            .reshape(B, L, self.num_heads, self.head_dim)
+            .transpose(0, 2, 1, 3)
+        )
 
-        out = fast.scaled_dot_product_attention(q, k, v, scale=self.scale, mask=causal_mask)
+        out = fast.scaled_dot_product_attention(
+            q, k, v, scale=self.scale, mask=causal_mask
+        )
         out = out.transpose(0, 2, 1, 3).reshape(B, L, -1)
         return self.out_proj(out)
 
@@ -62,7 +78,9 @@ class CLIPEncoderLayer(nn.Module):
         self.mlp = CLIPMLP(hidden_size, intermediate_size)
         self.layer_norm2 = nn.LayerNorm(hidden_size)
 
-    def __call__(self, hidden_states: mx.array, causal_mask: mx.array | None = None) -> mx.array:
+    def __call__(
+        self, hidden_states: mx.array, causal_mask: mx.array | None = None
+    ) -> mx.array:
         residual = hidden_states
         hidden_states = self.layer_norm1(hidden_states)
         hidden_states = self.self_attn(hidden_states, causal_mask)
@@ -77,14 +95,18 @@ class CLIPEncoderLayer(nn.Module):
 
 
 class CLIPEncoder(nn.Module):
-    def __init__(self, hidden_size: int, num_heads: int, intermediate_size: int, num_layers: int):
+    def __init__(
+        self, hidden_size: int, num_heads: int, intermediate_size: int, num_layers: int
+    ):
         super().__init__()
         self.layers = [
             CLIPEncoderLayer(hidden_size, num_heads, intermediate_size)
             for _ in range(num_layers)
         ]
 
-    def __call__(self, hidden_states: mx.array, causal_mask: mx.array | None = None) -> mx.array:
+    def __call__(
+        self, hidden_states: mx.array, causal_mask: mx.array | None = None
+    ) -> mx.array:
         for layer in self.layers:
             hidden_states = layer(hidden_states, causal_mask)
         return hidden_states
@@ -107,8 +129,12 @@ class CLIPTextModel(nn.Module):
         max_position_embeddings: int = 77,
     ):
         super().__init__()
-        self.embeddings = CLIPTextEmbeddings(vocab_size, hidden_size, max_position_embeddings)
-        self.encoder = CLIPEncoder(hidden_size, num_attention_heads, intermediate_size, num_hidden_layers)
+        self.embeddings = CLIPTextEmbeddings(
+            vocab_size, hidden_size, max_position_embeddings
+        )
+        self.encoder = CLIPEncoder(
+            hidden_size, num_attention_heads, intermediate_size, num_hidden_layers
+        )
         self.final_layer_norm = nn.LayerNorm(hidden_size)
         self._max_position_embeddings = max_position_embeddings
 
@@ -118,7 +144,9 @@ class CLIPTextModel(nn.Module):
 
         # Causal mask
         L = input_ids.shape[1]
-        causal_mask = nn.MultiHeadAttention.create_additive_causal_mask(L).astype(hidden.dtype)
+        causal_mask = nn.MultiHeadAttention.create_additive_causal_mask(L).astype(
+            hidden.dtype
+        )
 
         hidden = self.encoder(hidden, causal_mask)
         hidden = self.final_layer_norm(hidden)

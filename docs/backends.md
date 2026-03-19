@@ -10,7 +10,7 @@ compute-device logic from the inference and training pipeline.
 | `torch-cuda`  | if CUDA present | yes       | yes      | yes            | float16       | Full support                               |
 | `torch-mps`   | if MPS present  | yes       | no       | yes            | float16       | Training not tested; some ops fall to CPU   |
 | `torch-cpu`   | always          | yes       | no*      | no             | float32       | Slow but always works                      |
-| `mlx`         | if mlx installed| **no**    | no       | yes (unused)   | float16       | Scaffold only — see [MLX Status](#mlx-status) |
+| `mlx`         | if mlx installed| **yes**   | no       | yes            | float16       | Primary Apple Silicon backend              |
 
 \* CPU training is technically possible but omitted from capabilities because it is impractically slow.
 
@@ -129,17 +129,21 @@ print(backend.default_dtype_str())  # "float16"
 
 ## MLX Status
 
-**Current state: scaffold only — inference and training are both `False`.**
+**Current state: full inference pipeline operational on Apple Silicon.**
 
-The full StableVSR pipeline requires three components with no MLX equivalents today:
+The MLX backend (`src/stablevsr/mlx/`) provides:
 
-- **Custom ControlNet** — diffusers ControlNet architecture, heavily PyTorch-native.
-- **RAFT optical flow** — `torchvision.models.optical_flow.raft_large`, no MLX port.
-- **Bidirectional temporal sampling** — relies on PyTorch tensor operations and scheduler state.
+- **UNet, VAE, ControlNet** — all ported to native MLX with Metal GPU acceleration
+- **DDPM scheduler** — MLX-native reimplementation
+- **Tiled VAE decode** — auto-detected for large latents (>4096 px area)
+- **`mx.compile()`** — JIT shader fusion for 2.15× UNet speedup
+- **Temporal guidance step-skip** — configurable `ttg_start_step` to trade coherence for speed
 
-The `MLXBackend` class exists so the registry can detect and report MLX honestly,
-and so future work has a stable integration point. For Apple Silicon inference today,
-use `torch-mps`.
+RAFT optical flow uses a PyTorch CPU bridge (tensor round-trip). This is the
+only remaining torch dependency in the MLX inference path.
+
+See [benchmark_results.md](benchmark_results.md) for performance data and
+[apple_silicon.md](apple_silicon.md) for usage guide.
 
 ## Runtime Logging
 

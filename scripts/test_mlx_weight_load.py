@@ -1,6 +1,7 @@
 """Test loading real StableVSR weights into MLX models."""
-import sys
+
 import json
+import sys
 import time
 from pathlib import Path
 
@@ -8,7 +9,9 @@ sys.path.insert(0, "src")
 import mlx.core as mx
 import mlx.nn as nn
 
-MODEL_PATH = Path("models/StableVSR/models--claudiom4sir--StableVSR/snapshots/fddd0e3921c22a5dcc6468c56c44abe6564bacc2")
+MODEL_PATH = Path(
+    "models/StableVSR/models--claudiom4sir--StableVSR/snapshots/fddd0e3921c22a5dcc6468c56c44abe6564bacc2"
+)
 
 
 def test_text_encoder():
@@ -27,7 +30,9 @@ def test_text_encoder():
         max_position_embeddings=cfg["max_position_embeddings"],
     )
 
-    weights = load_safetensors_for_mlx(MODEL_PATH / "text_encoder" / "model.safetensors")
+    weights = load_safetensors_for_mlx(
+        MODEL_PATH / "text_encoder" / "model.safetensors"
+    )
     remapped = {}
     for k, v in weights.items():
         new_k = k.replace("text_model.", "", 1) if k.startswith("text_model.") else k
@@ -41,7 +46,9 @@ def test_text_encoder():
     mx.eval(out)
 
     n_params = sum(v.size for _, v in nn.utils.tree_flatten(model.parameters()))
-    print(f"  Text Encoder: {n_params:,} params, output = {out.shape}, dtype = {out.dtype}")
+    print(
+        f"  Text Encoder: {n_params:,} params, output = {out.shape}, dtype = {out.dtype}"
+    )
     assert out.shape == (1, 77, cfg["hidden_size"])
     return True
 
@@ -75,7 +82,9 @@ def test_vae():
     mx.eval(decoded)
 
     n_params = sum(v.size for _, v in nn.utils.tree_flatten(model.parameters()))
-    print(f"  VAE: {n_params:,} params, decode = {decoded.shape}, dtype = {decoded.dtype}")
+    print(
+        f"  VAE: {n_params:,} params, decode = {decoded.shape}, dtype = {decoded.dtype}"
+    )
     # 3 blocks → 2 upsamples → 4× spatial factor: 8→32
     assert decoded.shape == (1, 32, 32, 3)
     return True
@@ -124,7 +133,9 @@ def test_controlnet():
         layers_per_block=cfg.get("layers_per_block", 2),
         cross_attention_dim=cfg.get("cross_attention_dim", 1024),
         attention_head_dim=cfg.get("attention_head_dim", 8),
-        only_cross_attention=tuple(cfg.get("only_cross_attention", [True, True, True, False])),
+        only_cross_attention=tuple(
+            cfg.get("only_cross_attention", [True, True, True, False])
+        ),
     )
 
     weights = load_safetensors_for_mlx(
@@ -161,6 +172,7 @@ if __name__ == "__main__":
             status = "FAILED"
             print(f"  RESULT: {name}: {status} ({elapsed:.1f}s): {e}")
             import traceback
+
             traceback.print_exc()
             results.append((name, False))
 

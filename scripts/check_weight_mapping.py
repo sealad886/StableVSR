@@ -1,4 +1,5 @@
 """Verify weight mapping completeness between safetensors and MLX models."""
+
 import json
 import sys
 from pathlib import Path
@@ -37,7 +38,7 @@ def check_mapping(name, model, safetensors_path, config_path=None, prefix_strip=
 
     if prefix_strip:
         weights = {
-            (k[len(prefix_strip):] if k.startswith(prefix_strip) else k): v
+            (k[len(prefix_strip) :] if k.startswith(prefix_strip) else k): v
             for k, v in weights.items()
         }
 
@@ -75,10 +76,10 @@ def check_mapping(name, model, safetensors_path, config_path=None, prefix_strip=
 
 
 def main():
-    from stablevsr.mlx.models.text_encoder import CLIPTextModel
-    from stablevsr.mlx.models.vae import AutoencoderKL
-    from stablevsr.mlx.models.unet import UNet2DConditionModel
     from stablevsr.mlx.models.controlnet import ControlNetModel
+    from stablevsr.mlx.models.text_encoder import CLIPTextModel
+    from stablevsr.mlx.models.unet import UNet2DConditionModel
+    from stablevsr.mlx.models.vae import AutoencoderKL
 
     total_missing = 0
     total_extra = 0
@@ -95,7 +96,8 @@ def main():
         max_position_embeddings=cfg["max_position_embeddings"],
     )
     m, e = check_mapping(
-        "Text Encoder", te,
+        "Text Encoder",
+        te,
         MODEL_PATH / "text_encoder" / "model.safetensors",
         prefix_strip="text_model.",
     )
@@ -115,7 +117,8 @@ def main():
         scaling_factor=cfg.get("scaling_factor", 0.08333),
     )
     m, e = check_mapping(
-        "VAE", vae,
+        "VAE",
+        vae,
         MODEL_PATH / "vae" / "diffusion_pytorch_model.safetensors",
         MODEL_PATH / "vae" / "config.json",
     )
@@ -135,7 +138,8 @@ def main():
         only_cross_attention=tuple(cfg.get("only_cross_attention", [False] * 4)),
     )
     m, e = check_mapping(
-        "UNet", unet,
+        "UNet",
+        unet,
         MODEL_PATH / "unet" / "diffusion_pytorch_model.safetensors",
         MODEL_PATH / "unet" / "config.json",
     )
@@ -152,10 +156,13 @@ def main():
         layers_per_block=cfg.get("layers_per_block", 2),
         cross_attention_dim=cfg.get("cross_attention_dim", 1024),
         attention_head_dim=cfg.get("attention_head_dim", 8),
-        only_cross_attention=tuple(cfg.get("only_cross_attention", [True, True, True, False])),
+        only_cross_attention=tuple(
+            cfg.get("only_cross_attention", [True, True, True, False])
+        ),
     )
     m, e = check_mapping(
-        "ControlNet", cn,
+        "ControlNet",
+        cn,
         MODEL_PATH / "controlnet" / "diffusion_pytorch_model.safetensors",
         MODEL_PATH / "controlnet" / "config.json",
     )

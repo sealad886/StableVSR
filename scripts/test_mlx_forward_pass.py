@@ -1,4 +1,5 @@
 """Forward pass test with real weights for all MLX models."""
+
 import json
 import sys
 import time
@@ -14,7 +15,9 @@ MODEL_PATH = Path(
 )
 
 
-def load_model_and_weights(model_cls, config_path, weights_path, extra_kwargs=None, prefix_strip=None):
+def load_model_and_weights(
+    model_cls, config_path, weights_path, extra_kwargs=None, prefix_strip=None
+):
     """Helper to load config, create model, load weights."""
     from stablevsr.mlx.weight_utils import load_safetensors_for_mlx
 
@@ -27,7 +30,7 @@ def load_model_and_weights(model_cls, config_path, weights_path, extra_kwargs=No
     weights = load_safetensors_for_mlx(weights_path, config_path)
     if prefix_strip:
         weights = {
-            (k[len(prefix_strip):] if k.startswith(prefix_strip) else k): v
+            (k[len(prefix_strip) :] if k.startswith(prefix_strip) else k): v
             for k, v in weights.items()
         }
     model.load_weights(list(weights.items()), strict=False)
@@ -42,15 +45,22 @@ def test_text_encoder_forward():
         cfg = json.load(f)
 
     model = CLIPTextModel(
-        vocab_size=cfg["vocab_size"], hidden_size=cfg["hidden_size"],
+        vocab_size=cfg["vocab_size"],
+        hidden_size=cfg["hidden_size"],
         num_attention_heads=cfg["num_attention_heads"],
         num_hidden_layers=cfg["num_hidden_layers"],
         intermediate_size=cfg["intermediate_size"],
         max_position_embeddings=cfg["max_position_embeddings"],
     )
     from stablevsr.mlx.weight_utils import load_safetensors_for_mlx
-    weights = load_safetensors_for_mlx(MODEL_PATH / "text_encoder" / "model.safetensors")
-    remapped = {(k.replace("text_model.", "", 1) if k.startswith("text_model.") else k): v for k, v in weights.items()}
+
+    weights = load_safetensors_for_mlx(
+        MODEL_PATH / "text_encoder" / "model.safetensors"
+    )
+    remapped = {
+        (k.replace("text_model.", "", 1) if k.startswith("text_model.") else k): v
+        for k, v in weights.items()
+    }
     model.load_weights(list(remapped.items()), strict=False)
     mx.eval(model.parameters())
 
@@ -61,8 +71,12 @@ def test_text_encoder_forward():
 
     assert out.shape == (1, 77, 1024), f"Wrong shape: {out.shape}"
     assert not mx.isnan(out).any().item(), "NaN in text encoder output"
-    assert mx.abs(out).max().item() < 1000, f"Text encoder output too large: {mx.abs(out).max().item()}"
-    print(f"  Text Encoder: shape={out.shape}, range=[{out.min().item():.4f}, {out.max().item():.4f}]")
+    assert (
+        mx.abs(out).max().item() < 1000
+    ), f"Text encoder output too large: {mx.abs(out).max().item()}"
+    print(
+        f"  Text Encoder: shape={out.shape}, range=[{out.min().item():.4f}, {out.max().item():.4f}]"
+    )
     return True
 
 
@@ -74,7 +88,8 @@ def test_vae_forward():
         cfg = json.load(f)
 
     model = AutoencoderKL(
-        in_channels=cfg.get("in_channels", 3), out_channels=cfg.get("out_channels", 3),
+        in_channels=cfg.get("in_channels", 3),
+        out_channels=cfg.get("out_channels", 3),
         block_out_channels=tuple(cfg["block_out_channels"]),
         layers_per_block=cfg.get("layers_per_block", 2),
         latent_channels=cfg.get("latent_channels", 4),
@@ -92,20 +107,26 @@ def test_vae_forward():
     img = mx.random.normal((1, 64, 64, 3)) * 0.5
     latent = model.encode(img)
     mx.eval(latent)
-    print(f"  VAE Encode: {img.shape} -> {latent.shape}, range=[{latent.min().item():.4f}, {latent.max().item():.4f}]")
+    print(
+        f"  VAE Encode: {img.shape} -> {latent.shape}, range=[{latent.min().item():.4f}, {latent.max().item():.4f}]"
+    )
     assert not mx.isnan(latent).any().item(), "NaN in VAE encode"
 
     # Test decode
     z = mx.random.normal((1, 16, 16, 4)) * 0.1
     decoded = model.decode(z)
     mx.eval(decoded)
-    print(f"  VAE Decode: {z.shape} -> {decoded.shape}, range=[{decoded.min().item():.4f}, {decoded.max().item():.4f}]")
+    print(
+        f"  VAE Decode: {z.shape} -> {decoded.shape}, range=[{decoded.min().item():.4f}, {decoded.max().item():.4f}]"
+    )
     assert not mx.isnan(decoded).any().item(), "NaN in VAE decode"
 
     # Roundtrip test
     z2 = model.encode(decoded)
     mx.eval(z2)
-    print(f"  VAE Roundtrip: latent range=[{z2.min().item():.4f}, {z2.max().item():.4f}]")
+    print(
+        f"  VAE Roundtrip: latent range=[{z2.min().item():.4f}, {z2.max().item():.4f}]"
+    )
     return True
 
 
@@ -117,14 +138,35 @@ def test_unet_forward():
         cfg = json.load(f)
 
     model = UNet2DConditionModel(
-        in_channels=cfg["in_channels"], out_channels=cfg.get("out_channels", 4),
+        in_channels=cfg["in_channels"],
+        out_channels=cfg.get("out_channels", 4),
         block_out_channels=tuple(cfg["block_out_channels"]),
         layers_per_block=cfg.get("layers_per_block", 2),
         cross_attention_dim=cfg.get("cross_attention_dim", 1024),
         attention_head_dim=cfg.get("attention_head_dim", 8),
         only_cross_attention=tuple(cfg.get("only_cross_attention", [False] * 4)),
-        down_block_types=tuple(cfg.get("down_block_types", ["DownBlock2D", "CrossAttnDownBlock2D", "CrossAttnDownBlock2D", "CrossAttnDownBlock2D"])),
-        up_block_types=tuple(cfg.get("up_block_types", ["CrossAttnUpBlock2D", "CrossAttnUpBlock2D", "CrossAttnUpBlock2D", "UpBlock2D"])),
+        down_block_types=tuple(
+            cfg.get(
+                "down_block_types",
+                [
+                    "DownBlock2D",
+                    "CrossAttnDownBlock2D",
+                    "CrossAttnDownBlock2D",
+                    "CrossAttnDownBlock2D",
+                ],
+            )
+        ),
+        up_block_types=tuple(
+            cfg.get(
+                "up_block_types",
+                [
+                    "CrossAttnUpBlock2D",
+                    "CrossAttnUpBlock2D",
+                    "CrossAttnUpBlock2D",
+                    "UpBlock2D",
+                ],
+            )
+        ),
     )
     weights = load_safetensors_for_mlx(
         MODEL_PATH / "unet" / "diffusion_pytorch_model.safetensors",
@@ -141,7 +183,9 @@ def test_unet_forward():
     out = model(sample, timestep, encoder_hidden)
     mx.eval(out)
 
-    print(f"  UNet: {sample.shape} -> {out.shape}, range=[{out.min().item():.4f}, {out.max().item():.4f}]")
+    print(
+        f"  UNet: {sample.shape} -> {out.shape}, range=[{out.min().item():.4f}, {out.max().item():.4f}]"
+    )
     assert out.shape == (1, 8, 8, 4), f"Wrong UNet output shape: {out.shape}"
     assert not mx.isnan(out).any().item(), "NaN in UNet output"
     return True
@@ -161,9 +205,23 @@ def test_controlnet_forward():
         layers_per_block=cfg.get("layers_per_block", 2),
         cross_attention_dim=cfg.get("cross_attention_dim", 1024),
         attention_head_dim=cfg.get("attention_head_dim", 8),
-        only_cross_attention=tuple(cfg.get("only_cross_attention", [True, True, True, False])),
-        conditioning_embedding_out_channels=tuple(cfg.get("conditioning_embedding_out_channels", [64, 128, 256])),
-        down_block_types=tuple(cfg.get("down_block_types", ["DownBlock2D", "CrossAttnDownBlock2D", "CrossAttnDownBlock2D", "CrossAttnDownBlock2D"])),
+        only_cross_attention=tuple(
+            cfg.get("only_cross_attention", [True, True, True, False])
+        ),
+        conditioning_embedding_out_channels=tuple(
+            cfg.get("conditioning_embedding_out_channels", [64, 128, 256])
+        ),
+        down_block_types=tuple(
+            cfg.get(
+                "down_block_types",
+                [
+                    "DownBlock2D",
+                    "CrossAttnDownBlock2D",
+                    "CrossAttnDownBlock2D",
+                    "CrossAttnDownBlock2D",
+                ],
+            )
+        ),
     )
     weights = load_safetensors_for_mlx(
         MODEL_PATH / "controlnet" / "diffusion_pytorch_model.safetensors",
@@ -210,6 +268,7 @@ if __name__ == "__main__":
             elapsed = time.time() - t0
             print(f"  RESULT: {name}: FAILED ({elapsed:.1f}s): {e}")
             import traceback
+
             traceback.print_exc()
             results.append((name, False))
 

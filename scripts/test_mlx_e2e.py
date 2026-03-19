@@ -2,6 +2,7 @@
 
 Runs 2 denoising steps on 2 frames at native resolution (480×270 → 1920×1080).
 """
+
 import logging
 import sys
 import time
@@ -30,6 +31,7 @@ def main():
     logger.info("Loading MLX pipeline from pretrained weights...")
     t0 = time.time()
     from stablevsr.mlx.pipeline import MLXStableVSRPipeline
+
     pipe = MLXStableVSRPipeline.from_pretrained(MODEL_PATH, dtype=mx.float16)
     t_load = time.time() - t0
     logger.info(f"Pipeline loaded in {t_load:.1f}s")
@@ -50,7 +52,8 @@ def main():
     # 3. Load RAFT model
     logger.info("Loading RAFT optical flow model...")
     import torch
-    from torchvision.models.optical_flow import raft_small, Raft_Small_Weights
+    from torchvision.models.optical_flow import Raft_Small_Weights, raft_small
+
     raft_model = raft_small(weights=Raft_Small_Weights.DEFAULT)
     raft_model = raft_model.eval().cpu()
     for p in raft_model.parameters():
@@ -78,7 +81,9 @@ def main():
     logger.info(f"Pipeline done in {t_run:.1f}s")
 
     # 5. Validate outputs
-    assert len(output_frames) == len(frames), f"Expected {len(frames)} frames, got {len(output_frames)}"
+    assert len(output_frames) == len(
+        frames
+    ), f"Expected {len(frames)} frames, got {len(output_frames)}"
     for i, f in enumerate(output_frames):
         assert f.dtype == np.uint8, f"Frame {i}: wrong dtype {f.dtype}"
         assert f.ndim == 3 and f.shape[2] == 3, f"Frame {i}: wrong shape {f.shape}"

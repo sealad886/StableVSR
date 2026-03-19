@@ -52,12 +52,21 @@ def grid_sample(
     y1 = y0 + 1
 
     # Fractional parts
-    wa = ((x1.astype(mx.float32) - grid_x) * (y1.astype(mx.float32) - grid_y))[..., None]
-    wb = ((x1.astype(mx.float32) - grid_x) * (grid_y - y0.astype(mx.float32)))[..., None]
-    wc = ((grid_x - x0.astype(mx.float32)) * (y1.astype(mx.float32) - grid_y))[..., None]
-    wd = ((grid_x - x0.astype(mx.float32)) * (grid_y - y0.astype(mx.float32)))[..., None]
+    wa = ((x1.astype(mx.float32) - grid_x) * (y1.astype(mx.float32) - grid_y))[
+        ..., None
+    ]
+    wb = ((x1.astype(mx.float32) - grid_x) * (grid_y - y0.astype(mx.float32)))[
+        ..., None
+    ]
+    wc = ((grid_x - x0.astype(mx.float32)) * (y1.astype(mx.float32) - grid_y))[
+        ..., None
+    ]
+    wd = ((grid_x - x0.astype(mx.float32)) * (grid_y - y0.astype(mx.float32)))[
+        ..., None
+    ]
 
     if padding_mode == "zeros":
+
         def _safe_gather(arr: mx.array, iy: mx.array, ix: mx.array) -> mx.array:
             mask = (ix >= 0) & (ix < W) & (iy >= 0) & (iy < H)
             ix_c = mx.clip(ix, 0, W - 1)
@@ -200,7 +209,7 @@ def _cubic_interp_1d(
     result = mx.zeros_like(
         mx.broadcast_to(
             mx.zeros(1),
-            (*x.shape[:axis], len(coords), *x.shape[axis + 1:]),
+            (*x.shape[:axis], len(coords), *x.shape[axis + 1 :]),
         )
     ).astype(x.dtype)
 

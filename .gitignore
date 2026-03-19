@@ -5,3 +5,5 @@
 
 # E2E test artifacts (large generated frames/videos)
 e2e_test/
+
+models/

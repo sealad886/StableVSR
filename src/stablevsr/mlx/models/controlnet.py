@@ -32,7 +32,9 @@ class ControlNetConditioningEmbedding(nn.Module):
         conditioning_embedding_out_channels: int = 256,
     ):
         super().__init__()
-        self.conv_in = nn.Conv2d(conditioning_channels, block_out_channels[0], 3, padding=1)
+        self.conv_in = nn.Conv2d(
+            conditioning_channels, block_out_channels[0], 3, padding=1
+        )
 
         self.blocks = []
         ch_in = block_out_channels[0]
@@ -41,7 +43,9 @@ class ControlNetConditioningEmbedding(nn.Module):
             self.blocks.append(nn.Conv2d(ch_in, ch_out, 3, stride=2, padding=1))
             ch_in = ch_out
 
-        self.conv_out = nn.Conv2d(block_out_channels[-1], conditioning_embedding_out_channels, 3, padding=1)
+        self.conv_out = nn.Conv2d(
+            block_out_channels[-1], conditioning_embedding_out_channels, 3, padding=1
+        )
 
     def __call__(self, x: mx.array) -> mx.array:
         x = nn.silu(self.conv_in(x))
@@ -73,8 +77,10 @@ class ControlNetModel(nn.Module):
         only_cross_attention: tuple[bool, ...] = (True, True, True, False),
         conditioning_embedding_out_channels: tuple[int, ...] = (64, 128, 256),
         down_block_types: tuple[str, ...] = (
-            "DownBlock2D", "CrossAttnDownBlock2D",
-            "CrossAttnDownBlock2D", "CrossAttnDownBlock2D",
+            "DownBlock2D",
+            "CrossAttnDownBlock2D",
+            "CrossAttnDownBlock2D",
+            "CrossAttnDownBlock2D",
         ),
     ):
         super().__init__()
@@ -103,7 +109,9 @@ class ControlNetModel(nn.Module):
             if btype == "CrossAttnDownBlock2D":
                 self.down_blocks.append(
                     CrossAttnDownBlock2D(
-                        ch_in, ch_out, time_embed_dim,
+                        ch_in,
+                        ch_out,
+                        time_embed_dim,
                         num_layers=layers_per_block,
                         num_attention_heads=n_heads[i],
                         cross_attention_dim=cross_attention_dim,
@@ -114,7 +122,9 @@ class ControlNetModel(nn.Module):
             else:
                 self.down_blocks.append(
                     DownBlock2D(
-                        ch_in, ch_out, time_embed_dim,
+                        ch_in,
+                        ch_out,
+                        time_embed_dim,
                         num_layers=layers_per_block,
                         add_downsample=not is_last,
                     )
@@ -129,7 +139,8 @@ class ControlNetModel(nn.Module):
 
         # Mid block
         self.mid_block = UNetMidBlock2DCrossAttn(
-            block_out_channels[-1], time_embed_dim,
+            block_out_channels[-1],
+            time_embed_dim,
             num_attention_heads=n_heads[-1],
             cross_attention_dim=cross_attention_dim,
         )
@@ -165,7 +176,9 @@ class ControlNetModel(nn.Module):
         for block in self.down_blocks:
             sample, res_samples = block(sample, temb, encoder_hidden_states)
             for res in res_samples:
-                down_block_res_samples.append(self.controlnet_down_blocks[ctrl_idx](res))
+                down_block_res_samples.append(
+                    self.controlnet_down_blocks[ctrl_idx](res)
+                )
                 ctrl_idx += 1
 
         # Mid block
@@ -173,7 +186,9 @@ class ControlNetModel(nn.Module):
         mid_block_res_sample = self.controlnet_mid_block(sample)
 
         # Apply conditioning scale
-        down_block_res_samples = [s * conditioning_scale for s in down_block_res_samples]
+        down_block_res_samples = [
+            s * conditioning_scale for s in down_block_res_samples
+        ]
         mid_block_res_sample = mid_block_res_sample * conditioning_scale
 
         return down_block_res_samples, mid_block_res_sample

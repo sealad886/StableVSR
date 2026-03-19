@@ -1,21 +1,23 @@
 # ADR-0001: Rust/PyO3 Acceleration for StableVSR
 
-**Status:** Rejected  
+**Status:** Rejected (reconfirmed)  
 **Date:** 2025-03-18  
+**Updated:** 2025-07-10 — reconfirmed with MLX backend profiling data  
 **Context:** Phase 3 optimization pass on Apple Silicon inference  
 
 ## Decision
 
-Do not introduce Rust/PyO3 acceleration components at this time. The profiling
-evidence shows that Python-layer overhead is negligible compared to GPU-bound
-model forward passes.
+Do not introduce Rust/PyO3 acceleration components at this time. Profiling
+evidence from both the torch-MPS and MLX backends shows that Python-layer
+overhead is negligible compared to GPU-bound model forward passes.
 
 ## Context
 
 StableVSR performs video super-resolution using Stable Diffusion 1.x +
 ControlNet + RAFT optical flow with bidirectional temporal sampling. We
-profiled the full inference pipeline on Apple Silicon (MPS backend) to identify
-whether any hot paths would benefit from a compiled-language rewrite.
+profiled the full inference pipeline on Apple Silicon (both MPS and MLX
+backends) to identify whether any hot paths would benefit from a
+compiled-language rewrite.
 
 ## Evidence (Profiling Results)
 
@@ -69,3 +71,33 @@ The candidates for Rust acceleration and why they don't justify it:
 - If batch video processing introduces frame I/O as a bottleneck
 - If a Rust-native optical flow library offers measurably faster inference than
   RAFT on the target hardware
+
+## MLX Backend Profiling Update (2025-07-10)
+
+The MLX native backend was profiled at 2 frames × 2 steps, 480×270 → 1080×1920,
+float16 on Apple Silicon.
+
+| Stage | Time (s) | % of Denoising | Bottleneck Type |
+|---|---:|---:|---|
+| UNet (noise prediction) | 77.3 | 69.6% | GPU compute (Metal) |
+| VAE tiled decode (temporal guidance) | 26.0 | 23.4% | GPU compute (Metal) |
+| ControlNet | 7.4 | 6.7% | GPU compute (Metal) |
+| Flow warp | 0.3 | 0.3% | GPU interpolation |
+| Scheduler step | 0.1 | 0.1% | CPU arithmetic |
+
+**99.7%** GPU-bound on the MLX backend. The remaining 0.3% is flow warp (MLX
+grid interpolation) and scheduler (CPU-side tensor arithmetic). Neither would
+benefit from Rust reimplementation.
+
+**Key improvement achieved via `mx.compile()`:** UNet 77.3s → 36.0s (2.15×
+speedup) through JIT-compiled Metal shader fusion. This confirms that the
+acceleration path for this workload is GPU kernel fusion, not compiled-language
+Python replacement.
+
+RAFT optical flow remains on PyTorch CPU. This is the only non-MLX component.
+A Rust RAFT reimplementation would need to:
+1. Reimplement the RAFT architecture in a native Metal compute pipeline
+2. Match PyTorch's correlation volume computation precisely
+3. Handle all flow normalization and rescaling
+
+This exceeds reasonable ROI given RAFT accounts for <5% of pipeline time.

@@ -4,16 +4,56 @@ Running StableVSR on Apple Silicon Macs (M1/M2/M3/M4).
 
 ## TL;DR
 
+**MLX backend (recommended):**
+
+```bash
+pip install -e ".[apple]"
+python scripts/benchmark_mlx.py --scenarios smoke-160x90-1f-notile
+```
+
+**Torch-MPS backend (legacy):**
+
 ```bash
 pip install -e ".[apple]"
 stablevsr doctor
 stablevsr infer --input ./frames --output ./sr --fp16 --vae-tiling
 ```
 
-## Backend: torch-mps
+## Backends
 
-The `torch-mps` backend is the primary (and only functional) Apple Silicon backend.
-It uses PyTorch's Metal Performance Shaders integration.
+### MLX (Primary)
+
+The MLX backend provides native Apple Silicon inference with full Metal GPU
+acceleration. All StableVSR components (UNet, VAE, ControlNet, scheduler) run
+natively in MLX. Optical flow (RAFT) uses a minimal PyTorch bridge.
+
+| Capability | Status |
+|---|---|
+| Inference | **Fully supported** |
+| Training | Not supported |
+| float16 | Recommended (default) |
+| float32 | Works but slower |
+| Tiled VAE | Auto-detected (>4096 latent px) |
+| `mx.compile` | 2.15× UNet speedup |
+
+See [benchmark_results.md](benchmark_results.md) for detailed performance data.
+
+**Usage:**
+
+```python
+from stablevsr.mlx.pipeline import StableVSRMLXPipeline
+
+pipe = StableVSRMLXPipeline(model_dir="models/StableVSR/models--claudiom4sir--StableVSR/snapshots/...")
+results = pipe(
+    prompt="",
+    frames=frames,
+    num_inference_steps=20,
+    compile_models=True,      # JIT-compile UNet/ControlNet (recommended)
+    ttg_start_step=5,         # Skip temporal guidance early steps
+)
+```
+
+### Torch-MPS (Legacy)
 
 | Capability | Status |
 |---|---|
@@ -100,20 +140,27 @@ Use `--fp16` unless you have a specific reason not to.
    Large batches or high-resolution inputs can trigger system-level memory pressure.
    Use `--vae-tiling` and `--cpu-offload` proactively.
 
-## Why Not MLX?
+## MLX Optimization Flags
 
-The `mlx` backend exists as a scaffold but **cannot run the StableVSR pipeline**.
+| Parameter | Effect | Recommendation |
+|---|---|---|
+| `compile_models=True` | JIT-compiles UNet/ControlNet for Metal shader fusion | Always use for >1 step |
+| `ttg_start_step=N` | Skips temporal guidance on steps 0..N-1 | Use N ≤ num_steps // 2 |
+| Tiled VAE | Auto-enabled for large latents (>4096 px area) | Automatic; configurable |
 
-| Blocker | Detail |
-|---|---|
-| RAFT optical flow | No MLX implementation exists. StableVSR depends on RAFT for temporal alignment. |
-| ControlNet | Requires the `diffusers` library, which is PyTorch-native. |
-| Temporal sampling | Bidirectional sampling logic is deeply coupled to PyTorch tensors. |
-| Ecosystem maturity | MLX diffusion support is immature compared to `diffusers`. |
+### Quality–Speed Tradeoff
 
-The MLX scaffold is retained for future exploration. Today, use `torch-mps`.
+- `compile_models=True`: No quality impact. ~1-2s JIT warmup on first call per shape.
+- `ttg_start_step=1` with 2 steps: Minimal quality impact (TTG on final step only).
+- `ttg_start_step=10` with 20 steps: Moderate quality risk — temporal coherence may
+  degrade in early frames. Monitor inter-frame consistency visually.
 
-See [backends.md](backends.md) for the full backend capability matrix.
+## Why Not Rust/PyO3?
+
+Profiling both backends shows **>99% GPU-bound** execution. The dominant
+bottleneck (UNet, 69.6% of denoising) runs entirely as Metal GPU kernels.
+`mx.compile()` provides JIT fusion that a Rust rewrite cannot improve upon.
+See [ADR-0001](adr/0001-rust-acceleration-decision.md) for full analysis.
 
 ## Troubleshooting
 

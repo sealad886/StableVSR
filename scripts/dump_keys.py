@@ -1,6 +1,8 @@
 """Dump safetensors key names for analysis."""
+
 import sys
 from pathlib import Path
+
 from safetensors import safe_open
 
 MODEL_PATH = Path(
